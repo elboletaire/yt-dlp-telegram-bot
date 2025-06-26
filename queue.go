@@ -384,8 +384,19 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		// Show canceled message and auto-delete after 5 seconds
 		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(canceledStr, " by user"), 5*time.Second)
 	} else {
-		fmt.Print("  success! deleting progress message\n")
-		// Success: delete the progress message immediately since video was sent as reply
+		fmt.Print("  success!\n")
+
+		// Cancel any pending progress update timer to prevent race condition
+		if q.currentlyDownloadedEntry.progressUpdateTimer != nil {
+			q.currentlyDownloadedEntry.progressUpdateTimer.Stop()
+			select {
+			case <-q.currentlyDownloadedEntry.progressUpdateTimer.C:
+			default:
+			}
+			q.currentlyDownloadedEntry.progressUpdateTimer = nil
+		}
+
+		// Success: show success message and then delete the progress message
 		qEntry.editReply(ctx, "✅ Upload complete!")
 
 		// Wait a moment then properly delete the progress message
@@ -393,7 +404,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 			time.Sleep(3 * time.Second)
 			fmt.Printf("  deleting progress message ID: %d\n", qEntry.ProgressMsgID)
 			// Properly delete the progress message using the correct API
-			_, err := telegramSender.Delete().Messages(ctx, qEntry.ProgressMsgID)
+			_, err := telegramSender.Self().Revoke().Messages(ctx, qEntry.ProgressMsgID)
 			if err != nil {
 				fmt.Println("  error deleting progress message:", err)
 			} else {
