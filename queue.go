@@ -403,8 +403,19 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		go func() {
 			time.Sleep(3 * time.Second)
 			fmt.Printf("  deleting progress message ID: %d\n", qEntry.ProgressMsgID)
-			// Properly delete the progress message using the correct API
-			_, err := telegramSender.Self().Revoke().Messages(ctx, qEntry.ProgressMsgID)
+
+			var err error
+			if qEntry.FromGroup != nil {
+				// Group message - need peer context for deletion
+				fmt.Printf("  deleting from group chat ID: %d\n", qEntry.FromGroup.ChatID)
+				peer := &tg.InputPeerChat{ChatID: qEntry.FromGroup.ChatID}
+				_, err = telegramSender.To(peer).Revoke().Messages(ctx, qEntry.ProgressMsgID)
+			} else {
+				// DM - use Self() for private chats
+				fmt.Println("  deleting from private chat")
+				_, err = telegramSender.Self().Revoke().Messages(ctx, qEntry.ProgressMsgID)
+			}
+
 			if err != nil {
 				fmt.Println("  error deleting progress message:", err)
 			} else {
