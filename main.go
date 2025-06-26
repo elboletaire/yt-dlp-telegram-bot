@@ -59,6 +59,11 @@ func handleCmdDLP(ctx context.Context, msgCtx *MessageContext, messageText strin
 		return
 	}
 
+	// Check for troll after confirming it's a valid URL
+	if checkTroll(ctx, msgCtx) {
+		return
+	}
+
 	dlQueue.AddFromContext(ctx, msgCtx, messageText, format)
 }
 
@@ -122,11 +127,6 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 			fmt.Println("  user not allowed, ignoring")
 			return nil
 		}
-	}
-
-	// Check for troll before processing commands or URLs
-	if checkTroll(ctx, msgCtx) {
-		return nil
 	}
 
 	// Check if message is a command.
