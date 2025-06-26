@@ -380,14 +380,11 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		// Success: delete the progress message immediately since video was sent as reply
 		qEntry.editReply(ctx, "✅ Upload complete!")
 
-		// Wait a moment then try to delete the message
+		// Wait a moment then properly delete the progress message
 		go func() {
 			time.Sleep(3 * time.Second)
-			// For now, just clear the message content since proper deletion is complex
-			// This provides a cleaner experience than leaving the full progress message
-			qEntry.editReply(ctx, "✅")
-			time.Sleep(2 * time.Second)
-			qEntry.editReply(ctx, "")
+			// Properly delete the progress message using the correct API
+			_, _ = telegramSender.Delete().Messages(ctx, qEntry.ReplyMsg.ID)
 		}()
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
