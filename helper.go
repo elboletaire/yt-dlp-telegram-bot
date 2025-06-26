@@ -39,11 +39,19 @@ func getProgressbar(progressPercent, progressBarLen int) (progressBar string) {
 }
 
 func resolveMsgSrc(msg *tg.Message) (fromUser *tg.PeerUser, fromGroup *tg.PeerChat) {
-	fromGroup, isGroupMsg := msg.PeerID.(*tg.PeerChat)
-	if isGroupMsg {
+	switch peer := msg.PeerID.(type) {
+	case *tg.PeerChat:
+		// Group chat message
+		fromGroup = peer
 		fromUser = msg.FromID.(*tg.PeerUser)
-	} else {
-		fromUser = msg.PeerID.(*tg.PeerUser)
+	case *tg.PeerChannel:
+		// Channel message - treat channel like a group
+		fromGroup = &tg.PeerChat{ChatID: peer.ChannelID}
+		fromUser = msg.FromID.(*tg.PeerUser)
+	case *tg.PeerUser:
+		// Direct message
+		fromUser = peer
+		fromGroup = nil
 	}
 	return
 }
