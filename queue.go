@@ -13,7 +13,6 @@ import (
 const processStartStr = "🔍 Getting information..."
 const processStr = "🔨 Processing"
 const uploadStr = "☁️ Uploading"
-const uploadDoneStr = "🏁 Uploading"
 const errorStr = "❌ Error"
 const canceledStr = "❌ Canceled"
 
@@ -86,6 +85,7 @@ type currentlyDownloadedEntryType struct {
 	lastProgressPercent          int
 	lastDisplayedProgressPercent int
 	progressUpdateTimer          *time.Timer
+	successMessageShown          bool // Prevents any updates after success message
 
 	sourceCodecInfo string
 	progressInfo    string
@@ -256,11 +256,43 @@ func (q *DownloadQueue) updateProgress(ctx context.Context, qEntry *DownloadQueu
 	q.currentlyDownloadedEntry.lastDisplayedProgressPercent = progressPercent
 }
 
+// forceUpdateProgress bypasses all rate limiting and timers to guarantee message delivery
+func (q *DownloadQueue) forceUpdateProgress(ctx context.Context, qEntry *DownloadQueueEntry, message string) {
+	// Cancel any pending timers first
+	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
+	if q.currentlyDownloadedEntry.progressUpdateTimer != nil {
+		q.currentlyDownloadedEntry.progressUpdateTimer.Stop()
+		select {
+		case <-q.currentlyDownloadedEntry.progressUpdateTimer.C:
+		default:
+		}
+		q.currentlyDownloadedEntry.progressUpdateTimer = nil
+	}
+	// Mark that success message has been shown
+	q.currentlyDownloadedEntry.successMessageShown = true
+	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
+
+	// Direct edit, bypassing all rate limiting
+	qEntry.editReply(ctx, message)
+}
+
 func (q *DownloadQueue) HandleProgressPercentUpdate(progressStr string, progressPercent int) {
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
 	defer q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 
+	// Block all updates after success message has been shown
+	if q.currentlyDownloadedEntry.successMessageShown {
+		return
+	}
+
 	if q.currentlyDownloadedEntry.disableProgressPercentUpdate || q.currentlyDownloadedEntry.lastProgressPercent == progressPercent {
+		return
+	}
+
+	// Critical updates (100% progress) bypass all rate limiting
+	isCriticalUpdate := progressPercent == 100
+	if isCriticalUpdate {
+		q.updateProgress(q.ctx, &q.entries[0], progressStr, progressPercent)
 		return
 	}
 
@@ -386,18 +418,8 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	} else {
 		fmt.Print("  success!\n")
 
-		// Cancel any pending progress update timer to prevent race condition
-		if q.currentlyDownloadedEntry.progressUpdateTimer != nil {
-			q.currentlyDownloadedEntry.progressUpdateTimer.Stop()
-			select {
-			case <-q.currentlyDownloadedEntry.progressUpdateTimer.C:
-			default:
-			}
-			q.currentlyDownloadedEntry.progressUpdateTimer = nil
-		}
-
-		// Success: show success message and then delete the progress message
-		qEntry.editReply(ctx, "✅ Upload complete!")
+		// Force the success message, bypassing all rate limiting
+		q.forceUpdateProgress(ctx, qEntry, "✅ Upload complete!")
 
 		// Wait a moment then properly delete the progress message
 		go func() {
