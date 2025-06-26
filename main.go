@@ -55,7 +55,6 @@ func handleCmdDLP(ctx context.Context, msgCtx *MessageContext, messageText strin
 	}
 	if !validURI {
 		fmt.Println("  (not an url)")
-		_, _ = msgCtx.ReplyBuilder().Text(ctx, errorStr+": please enter an URL to download")
 		return
 	}
 
