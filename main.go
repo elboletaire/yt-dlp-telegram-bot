@@ -127,9 +127,8 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 		}
 	}
 
-	if msgCtx.FromGroupID == nil {
-		handleCmdDLP(ctx, msgCtx, msgCtx.MessageText)
-	}
+	// Process URLs for both direct messages and authorized groups
+	handleCmdDLP(ctx, msgCtx, msgCtx.MessageText)
 	return nil
 }
 
