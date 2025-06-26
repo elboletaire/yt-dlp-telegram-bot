@@ -157,7 +157,34 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 
 	newEntry.Reply = msgCtx.ReplyBuilder()
 	replyText, _ := newEntry.Reply.Text(ctx, replyStr)
-	newEntry.ReplyMsg = replyText.(*tg.UpdateShortSentMessage)
+
+	// Handle different response types for regular vs channel messages
+	switch reply := replyText.(type) {
+	case *tg.UpdateShortSentMessage:
+		// Regular message response
+		newEntry.ReplyMsg = reply
+	case *tg.Updates:
+		// Channel message response - extract the message from updates
+		for _, update := range reply.Updates {
+			if msgUpdate, ok := update.(*tg.UpdateNewChannelMessage); ok {
+				if sentMsg, ok := msgUpdate.Message.(*tg.Message); ok {
+					// Create a compatible UpdateShortSentMessage structure
+					newEntry.ReplyMsg = &tg.UpdateShortSentMessage{
+						ID:   sentMsg.ID,
+						Date: sentMsg.Date,
+					}
+					break
+				}
+			}
+		}
+		// Fallback if we couldn't find the message in updates
+		if newEntry.ReplyMsg == nil {
+			newEntry.ReplyMsg = &tg.UpdateShortSentMessage{ID: 0, Date: 0}
+		}
+	default:
+		// Fallback for any other response type
+		newEntry.ReplyMsg = &tg.UpdateShortSentMessage{ID: 0, Date: 0}
+	}
 
 	q.entries = append(q.entries, newEntry)
 	q.mutex.Unlock()
