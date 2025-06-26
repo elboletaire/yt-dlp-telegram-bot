@@ -23,17 +23,26 @@ var dlQueue DownloadQueue
 var telegramUploader *uploader.Uploader
 var telegramSender *message.Sender
 
-func handleCmdDLP(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage, msg *tg.Message) {
+type MessageContext struct {
+	MessageText  string
+	IsOutgoing   bool
+	Entities     tg.Entities
+	FromUserID   int64
+	FromGroupID  *int64 // nil if not from group
+	ReplyBuilder func() *message.Builder
+}
+
+func handleCmdDLP(ctx context.Context, msgCtx *MessageContext, messageText string) {
 	format := "video"
-	s := strings.Split(msg.Message, " ")
+	s := strings.Split(messageText, " ")
 	if len(s) >= 2 && s[0] == "mp3" {
-		msg.Message = strings.Join(s[1:], " ")
+		messageText = strings.Join(s[1:], " ")
 		format = "mp3"
 	}
 
 	// Check if message is an URL.
 	validURI := true
-	uri, err := url.ParseRequestURI(msg.Message)
+	uri, err := url.ParseRequestURI(messageText)
 	if err != nil || (uri.Scheme != "http" && uri.Scheme != "https") {
 		validURI = false
 	} else {
@@ -44,83 +53,134 @@ func handleCmdDLP(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMess
 	}
 	if !validURI {
 		fmt.Println("  (not an url)")
-		_, _ = telegramSender.Reply(entities, u).Text(ctx, errorStr+": please enter an URL to download")
+		_, _ = msgCtx.ReplyBuilder().Text(ctx, errorStr+": please enter an URL to download")
 		return
 	}
 
-	dlQueue.Add(ctx, entities, u, msg.Message, format)
+	dlQueue.AddFromContext(ctx, msgCtx, messageText, format)
 }
 
-func handleCmdDLPCancel(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage, msg *tg.Message) {
-	dlQueue.CancelCurrentEntry(ctx, entities, u, msg.Message)
+func handleCmdDLPCancel(ctx context.Context, msgCtx *MessageContext, messageText string) {
+	dlQueue.CancelCurrentEntryFromContext(ctx, msgCtx, messageText)
 }
 
-func handleMsg(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage) error {
-	msg, ok := u.Message.(*tg.Message)
-	if !ok || msg.Out {
+func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
+	if msgCtx.IsOutgoing {
 		// Outgoing message, not interesting.
 		return nil
 	}
 
-	fromUser, fromGroup := resolveMsgSrc(msg)
-	fromUsername := getFromUsername(entities, fromUser.UserID)
+	fromUsername := getFromUsername(msgCtx.Entities, msgCtx.FromUserID)
 
 	fmt.Print("got message")
 	if fromUsername != "" {
-		fmt.Print(" from ", fromUsername, "#", fromUser.UserID)
+		fmt.Print(" from ", fromUsername, "#", msgCtx.FromUserID)
 	}
-	fmt.Println(":", msg.Message)
+	fmt.Println(":", msgCtx.MessageText)
 
-	if fromGroup != nil {
-		fmt.Print("  msg from group #", -fromGroup.ChatID)
-		if !slices.Contains(params.AllowedGroupIDs, -fromGroup.ChatID) {
+	if msgCtx.FromGroupID != nil {
+		fmt.Println("  (group message)")
+		fmt.Print("  msg from group #", *msgCtx.FromGroupID)
+		if !slices.Contains(params.AllowedGroupIDs, *msgCtx.FromGroupID) {
 			fmt.Println(", group not allowed, ignoring")
 			return nil
 		}
 		fmt.Println()
 	} else {
-		if !slices.Contains(params.AllowedUserIDs, fromUser.UserID) {
+		if !slices.Contains(params.AllowedUserIDs, msgCtx.FromUserID) {
 			fmt.Println("  user not allowed, ignoring")
 			return nil
 		}
 	}
 
 	// Check if message is a command.
-	if msg.Message[0] == '/' || msg.Message[0] == '!' {
-		cmd := strings.Split(msg.Message, " ")[0]
-		msg.Message = strings.TrimPrefix(msg.Message, cmd+" ")
+	if msgCtx.MessageText[0] == '/' || msgCtx.MessageText[0] == '!' {
+		cmd := strings.Split(msgCtx.MessageText, " ")[0]
+		messageText := strings.TrimPrefix(msgCtx.MessageText, cmd+" ")
 		if strings.Contains(cmd, "@") {
 			cmd = strings.Split(cmd, "@")[0]
 		}
 		cmd = cmd[1:] // Cutting the command character.
 		switch cmd {
 		case "dlp":
-			handleCmdDLP(ctx, entities, u, msg)
+			handleCmdDLP(ctx, msgCtx, messageText)
 			return nil
 		case "dlpcancel":
-			handleCmdDLPCancel(ctx, entities, u, msg)
+			handleCmdDLPCancel(ctx, msgCtx, messageText)
 			return nil
 		case "start":
 			fmt.Println("  (start cmd)")
-			if fromGroup == nil {
-				_, _ = telegramSender.Reply(entities, u).Text(ctx, "🤖 Welcome! This bot downloads videos from various "+
+			if msgCtx.FromGroupID == nil {
+				_, _ = msgCtx.ReplyBuilder().Text(ctx, "🤖 Welcome! This bot downloads videos from various "+
 					"supported sources and then re-uploads them to Telegram, so they can be viewed with Telegram's built-in "+
 					"video player.\n\nMore info: https://github.com/nonoo/yt-dlp-telegram-bot")
 			}
 			return nil
 		default:
 			fmt.Println("  (invalid cmd)")
-			if fromGroup == nil {
-				_, _ = telegramSender.Reply(entities, u).Text(ctx, errorStr+": invalid command")
+			if msgCtx.FromGroupID == nil {
+				_, _ = msgCtx.ReplyBuilder().Text(ctx, errorStr+": invalid command")
 			}
 			return nil
 		}
 	}
 
-	if fromGroup == nil {
-		handleCmdDLP(ctx, entities, u, msg)
+	if msgCtx.FromGroupID == nil {
+		handleCmdDLP(ctx, msgCtx, msgCtx.MessageText)
 	}
 	return nil
+}
+
+func handleMsg(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage) error {
+	msg, ok := u.Message.(*tg.Message)
+	if !ok {
+		return nil
+	}
+
+	fromUser, fromGroup := resolveMsgSrc(msg)
+
+	var fromGroupID *int64
+	if fromGroup != nil {
+		groupID := -fromGroup.ChatID
+		fromGroupID = &groupID
+	}
+
+	msgCtx := &MessageContext{
+		MessageText:  msg.Message,
+		IsOutgoing:   msg.Out,
+		Entities:     entities,
+		FromUserID:   fromUser.UserID,
+		FromGroupID:  fromGroupID,
+		ReplyBuilder: func() *message.Builder { return telegramSender.Reply(entities, u) },
+	}
+
+	return handleMessageContext(ctx, msgCtx)
+}
+
+func handleChannelMsg(ctx context.Context, entities tg.Entities, u *tg.UpdateNewChannelMessage) error {
+	msg, ok := u.Message.(*tg.Message)
+	if !ok {
+		return fmt.Errorf("expected tg.Message, got %T", u.Message)
+	}
+
+	fromUser, fromGroup := resolveMsgSrc(msg)
+
+	var fromGroupID *int64
+	if fromGroup != nil {
+		groupID := -fromGroup.ChatID
+		fromGroupID = &groupID
+	}
+
+	msgCtx := &MessageContext{
+		MessageText:  msg.Message,
+		IsOutgoing:   msg.Out,
+		Entities:     entities,
+		FromUserID:   fromUser.UserID,
+		FromGroupID:  fromGroupID,
+		ReplyBuilder: func() *message.Builder { return telegramSender.Reply(entities, u) },
+	}
+
+	return handleMessageContext(ctx, msgCtx)
 }
 
 func main() {
@@ -173,6 +233,7 @@ func main() {
 		dlQueue.Init(ctx)
 
 		dispatcher.OnNewMessage(handleMsg)
+		dispatcher.OnNewChannelMessage(handleChannelMsg)
 
 		fmt.Println("telegram connection up")
 

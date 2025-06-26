@@ -122,6 +122,49 @@ func (q *DownloadQueue) Add(ctx context.Context, entities tg.Entities, u *tg.Upd
 	}
 }
 
+func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageContext, url, format string) {
+	q.mutex.Lock()
+
+	var replyStr string
+	if len(q.entries) == 0 {
+		replyStr = processStartStr
+	} else {
+		fmt.Println("  queueing request at position #", len(q.entries))
+		replyStr = q.getQueuePositionString(len(q.entries))
+	}
+
+	// Create a mock message for compatibility with existing queue structure
+	mockMsg := &tg.Message{
+		Message: msgCtx.MessageText,
+		Out:     msgCtx.IsOutgoing,
+	}
+
+	newEntry := DownloadQueueEntry{
+		URL:          url,
+		Format:       format,
+		OrigEntities: msgCtx.Entities,
+		OrigMsg:      mockMsg,
+	}
+
+	// Set up user/group info
+	newEntry.FromUser = &tg.PeerUser{UserID: msgCtx.FromUserID}
+	if msgCtx.FromGroupID != nil {
+		newEntry.FromGroup = &tg.PeerChat{ChatID: -*msgCtx.FromGroupID}
+	}
+
+	newEntry.Reply = msgCtx.ReplyBuilder()
+	replyText, _ := newEntry.Reply.Text(ctx, replyStr)
+	newEntry.ReplyMsg = replyText.(*tg.UpdateShortSentMessage)
+
+	q.entries = append(q.entries, newEntry)
+	q.mutex.Unlock()
+
+	select {
+	case q.processReqChan <- true:
+	default:
+	}
+}
+
 func (q *DownloadQueue) CancelCurrentEntry(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage, url string) {
 	q.mutex.Lock()
 	if len(q.entries) > 0 {
@@ -130,6 +173,18 @@ func (q *DownloadQueue) CancelCurrentEntry(ctx context.Context, entities tg.Enti
 	} else {
 		fmt.Println("  no active request to cancel")
 		_, _ = telegramSender.Reply(entities, u).Text(ctx, errorStr+": no active request to cancel")
+	}
+	q.mutex.Unlock()
+}
+
+func (q *DownloadQueue) CancelCurrentEntryFromContext(ctx context.Context, msgCtx *MessageContext, url string) {
+	q.mutex.Lock()
+	if len(q.entries) > 0 {
+		q.entries[0].Canceled = true
+		q.entries[0].CtxCancel()
+	} else {
+		fmt.Println("  no active request to cancel")
+		_, _ = msgCtx.ReplyBuilder().Text(ctx, errorStr+": no active request to cancel")
 	}
 	q.mutex.Unlock()
 }
