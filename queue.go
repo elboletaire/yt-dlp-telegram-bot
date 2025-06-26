@@ -33,8 +33,9 @@ type DownloadQueueEntry struct {
 	FromUser             *tg.PeerUser
 	FromGroup            *tg.PeerChat
 
-	Reply    *message.Builder
-	ReplyMsg *tg.UpdateShortSentMessage
+	Reply         *message.Builder
+	ReplyMsg      *tg.UpdateShortSentMessage
+	ProgressMsgID int // ID of our progress message (to be deleted later)
 
 	Ctx       context.Context
 	CtxCancel context.CancelFunc
@@ -127,6 +128,9 @@ func (q *DownloadQueue) Add(ctx context.Context, entities tg.Entities, u *tg.Upd
 	replyText, _ := newEntry.Reply.Text(ctx, replyStr)
 	newEntry.ReplyMsg = replyText.(*tg.UpdateShortSentMessage)
 
+	// Store the ID of our progress message for later deletion
+	newEntry.ProgressMsgID = newEntry.ReplyMsg.ID
+
 	newEntry.FromUser, newEntry.FromGroup = resolveMsgSrc(newEntry.OrigMsg)
 
 	q.entries = append(q.entries, newEntry)
@@ -178,6 +182,7 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 	case *tg.UpdateShortSentMessage:
 		// Regular message response
 		newEntry.ReplyMsg = reply
+		newEntry.ProgressMsgID = reply.ID
 	case *tg.Updates:
 		// Channel message response - extract the message from updates
 		for _, update := range reply.Updates {
@@ -188,6 +193,7 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 						ID:   sentMsg.ID,
 						Date: sentMsg.Date,
 					}
+					newEntry.ProgressMsgID = sentMsg.ID
 					break
 				}
 			}
@@ -195,10 +201,12 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 		// Fallback if we couldn't find the message in updates
 		if newEntry.ReplyMsg == nil {
 			newEntry.ReplyMsg = &tg.UpdateShortSentMessage{ID: 0, Date: 0}
+			newEntry.ProgressMsgID = 0
 		}
 	default:
 		// Fallback for any other response type
 		newEntry.ReplyMsg = &tg.UpdateShortSentMessage{ID: 0, Date: 0}
+		newEntry.ProgressMsgID = 0
 	}
 
 	q.entries = append(q.entries, newEntry)
@@ -383,8 +391,14 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		// Wait a moment then properly delete the progress message
 		go func() {
 			time.Sleep(3 * time.Second)
+			fmt.Printf("  deleting progress message ID: %d\n", qEntry.ProgressMsgID)
 			// Properly delete the progress message using the correct API
-			_, _ = telegramSender.Delete().Messages(ctx, qEntry.ReplyMsg.ID)
+			_, err := telegramSender.Delete().Messages(ctx, qEntry.ProgressMsgID)
+			if err != nil {
+				fmt.Println("  error deleting progress message:", err)
+			} else {
+				fmt.Println("  progress message deleted successfully!")
+			}
 		}()
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
