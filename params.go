@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dustin/go-humanize"
+	"github.com/joho/godotenv"
 	"github.com/wader/goutubedl"
 	"golang.org/x/exp/slices"
 )
@@ -31,6 +32,9 @@ type paramsType struct {
 var params paramsType
 
 func (p *paramsType) Init() error {
+	// Load .env file if it exists (ignore errors if file doesn't exist)
+	_ = godotenv.Load()
+
 	// Further available environment variables:
 	// 	SESSION_FILE:  path to session file
 	// 	SESSION_DIR:   path to session directory, if SESSION_FILE is not set
@@ -49,7 +53,7 @@ func (p *paramsType) Init() error {
 	var trollUserIDs string
 	flag.StringVar(&trollUserIDs, "troll-user-ids", "", "telegram user ids to troll")
 	var trollSentences string
-	flag.StringVar(&trollSentences, "troll-sentences", "", "comma-separated list of troll sentences")
+	flag.StringVar(&trollSentences, "troll-sentences", "", "double-colon-separated list of troll sentences (e.g. 'Nice try!::Not today!::Gotcha!')")
 	flag.IntVar(&p.TrollProbability, "troll-probability", 0, "probability (0-100) of trolling")
 	var maxSize string
 	flag.StringVar(&maxSize, "max-size", "", "allowed max size of video files")
@@ -155,7 +159,7 @@ func (p *paramsType) Init() error {
 		trollSentences = os.Getenv("TROLL_SENTENCES")
 	}
 	if trollSentences != "" {
-		sentences := strings.Split(trollSentences, ",")
+		sentences := strings.Split(trollSentences, "::")
 		for _, sentence := range sentences {
 			sentence = strings.TrimSpace(sentence)
 			if sentence != "" {
