@@ -114,13 +114,13 @@ func (p *Uploader) sendMediaWithRetry(ctx context.Context, qEntry *DownloadQueue
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		var err error
 
-		// Try to send the media based on message type
+		// Try to send the media as reply to original message
 		if qEntry.OrigMsgUpdate != nil {
-			// Regular message
-			_, err = telegramSender.Answer(qEntry.OrigEntities, qEntry.OrigMsgUpdate).Media(ctx, document)
+			// Regular message - send as reply
+			_, err = telegramSender.Reply(qEntry.OrigEntities, qEntry.OrigMsgUpdate).Media(ctx, document)
 		} else if qEntry.OrigChannelMsgUpdate != nil {
-			// Channel message
-			_, err = telegramSender.Answer(qEntry.OrigEntities, qEntry.OrigChannelMsgUpdate).Media(ctx, document)
+			// Channel message - send as reply
+			_, err = telegramSender.Reply(qEntry.OrigEntities, qEntry.OrigChannelMsgUpdate).Media(ctx, document)
 		} else {
 			return fmt.Errorf("no valid update found in queue entry")
 		}

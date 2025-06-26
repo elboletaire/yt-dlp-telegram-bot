@@ -65,6 +65,19 @@ func (e *DownloadQueueEntry) editReply(ctx context.Context, s string) {
 	e.sendTypingAction(ctx)
 }
 
+func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, s string, deleteAfter time.Duration) {
+	e.editReply(ctx, s)
+	if deleteAfter > 0 {
+		go func() {
+			time.Sleep(deleteAfter)
+			// Try to delete the message after the specified duration
+			e.editReply(ctx, "🗑️ Message deleted")
+			time.Sleep(1 * time.Second)
+			e.editReply(ctx, "")
+		}()
+	}
+}
+
 type currentlyDownloadedEntryType struct {
 	disableProgressPercentUpdate bool
 	progressPercentUpdateMutex   sync.Mutex
@@ -330,7 +343,8 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
 		q.currentlyDownloadedEntry.disableProgressPercentUpdate = true
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
-		qEntry.editReply(ctx, fmt.Sprint(errorStr+": ", err))
+		// Show error and auto-delete after 10 seconds
+		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(errorStr+": ", err), 10*time.Second)
 		return
 	}
 
@@ -347,7 +361,8 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		q.currentlyDownloadedEntry.disableProgressPercentUpdate = true
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 		r.Close()
-		qEntry.editReply(ctx, fmt.Sprint(errorStr+": ", err))
+		// Show error and auto-delete after 10 seconds
+		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(errorStr+": ", err), 10*time.Second)
 		return
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
@@ -358,10 +373,14 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
 	if qEntry.Canceled {
 		fmt.Print("  canceled\n")
-		q.updateProgress(ctx, qEntry, canceledStr, q.currentlyDownloadedEntry.lastProgressPercent)
-	} else if q.currentlyDownloadedEntry.lastDisplayedProgressPercent < 100 {
-		fmt.Print("  progress: 100%\n")
-		q.updateProgress(ctx, qEntry, uploadDoneStr, 100)
+		// Show canceled message and auto-delete after 5 seconds
+		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(canceledStr, " by user"), 5*time.Second)
+	} else {
+		fmt.Print("  success! deleting progress message\n")
+		// Success: delete the progress message immediately since video was sent as reply
+		qEntry.editReply(ctx, "✅ Upload complete! Progress message will be deleted...")
+		time.Sleep(2 * time.Second)
+		qEntry.editReply(ctx, "")
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 	qEntry.sendTypingCancelAction(ctx)

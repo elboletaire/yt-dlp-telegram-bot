@@ -129,6 +129,12 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 		}
 	}
 
+	// Check if message has text content (images, videos, stickers don't have text)
+	if len(msgCtx.MessageText) == 0 {
+		fmt.Println("  (non-text message, ignoring)")
+		return nil
+	}
+
 	// Check if message is a command.
 	if msgCtx.MessageText[0] == '/' || msgCtx.MessageText[0] == '!' {
 		cmd := strings.Split(msgCtx.MessageText, " ")[0]
