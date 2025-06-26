@@ -18,7 +18,9 @@ const errorStr = "❌ Error"
 const canceledStr = "❌ Canceled"
 
 const maxProgressPercentUpdateInterval = time.Second
+const maxProgressPercentUpdateIntervalGroup = 5 * time.Second // Slower updates for groups/channels
 const progressBarLength = 10
+const minProgressPercentChange = 10 // Only update every 10% for groups/channels
 
 type DownloadQueueEntry struct {
 	URL    string
@@ -240,6 +242,20 @@ func (q *DownloadQueue) HandleProgressPercentUpdate(progressStr string, progress
 	if q.currentlyDownloadedEntry.disableProgressPercentUpdate || q.currentlyDownloadedEntry.lastProgressPercent == progressPercent {
 		return
 	}
+
+	// Check if this is a group/channel message to apply different rate limiting
+	isGroupMessage := len(q.entries) > 0 && q.entries[0].FromGroup != nil
+
+	// For groups/channels, only update on significant progress changes
+	if isGroupMessage {
+		progressDiff := progressPercent - q.currentlyDownloadedEntry.lastDisplayedProgressPercent
+		if progressDiff < minProgressPercentChange && progressPercent < 100 && progressPercent > 0 {
+			// Skip this update - not enough progress change for group messages
+			q.currentlyDownloadedEntry.lastProgressPercent = progressPercent
+			return
+		}
+	}
+
 	q.currentlyDownloadedEntry.lastProgressPercent = progressPercent
 	if progressPercent < 0 {
 		q.currentlyDownloadedEntry.disableProgressPercentUpdate = true
@@ -255,9 +271,15 @@ func (q *DownloadQueue) HandleProgressPercentUpdate(progressStr string, progress
 		}
 	}
 
+	// Use different update intervals for groups vs direct messages
+	updateInterval := maxProgressPercentUpdateInterval
+	if isGroupMessage {
+		updateInterval = maxProgressPercentUpdateIntervalGroup
+	}
+
 	timeElapsedSinceLastUpdate := time.Since(q.currentlyDownloadedEntry.lastProgressPercentUpdateAt)
-	if timeElapsedSinceLastUpdate < maxProgressPercentUpdateInterval {
-		q.currentlyDownloadedEntry.progressUpdateTimer = time.AfterFunc(maxProgressPercentUpdateInterval-timeElapsedSinceLastUpdate, func() {
+	if timeElapsedSinceLastUpdate < updateInterval {
+		q.currentlyDownloadedEntry.progressUpdateTimer = time.AfterFunc(updateInterval-timeElapsedSinceLastUpdate, func() {
 			q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
 			if !q.currentlyDownloadedEntry.disableProgressPercentUpdate {
 				q.updateProgress(q.ctx, &q.entries[0], progressStr, progressPercent)

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/flytam/filenamify"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 )
 
 type Uploader struct{}
@@ -101,20 +103,52 @@ func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueu
 		document = message.UploadedDocument(upload).Filename(filename).Video()
 	}
 
-	// Sending message with media - handle both regular and channel messages
-	if qEntry.OrigMsgUpdate != nil {
-		// Regular message
-		if _, err := telegramSender.Answer(qEntry.OrigEntities, qEntry.OrigMsgUpdate).Media(ctx, document); err != nil {
+	// Sending message with media - handle both regular and channel messages with FLOOD_WAIT retry
+	return p.sendMediaWithRetry(ctx, qEntry, document)
+}
+
+// sendMediaWithRetry sends media with automatic FLOOD_WAIT retry handling
+func (p *Uploader) sendMediaWithRetry(ctx context.Context, qEntry *DownloadQueueEntry, document message.MediaOption) error {
+	maxRetries := 3
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		var err error
+
+		// Try to send the media based on message type
+		if qEntry.OrigMsgUpdate != nil {
+			// Regular message
+			_, err = telegramSender.Answer(qEntry.OrigEntities, qEntry.OrigMsgUpdate).Media(ctx, document)
+		} else if qEntry.OrigChannelMsgUpdate != nil {
+			// Channel message
+			_, err = telegramSender.Answer(qEntry.OrigEntities, qEntry.OrigChannelMsgUpdate).Media(ctx, document)
+		} else {
+			return fmt.Errorf("no valid update found in queue entry")
+		}
+
+		if err == nil {
+			// Success!
+			return nil
+		}
+
+		// Check if it's a FLOOD_WAIT error
+		if waitDuration, isFloodWait := tgerr.AsFloodWait(err); isFloodWait {
+			fmt.Printf("  FLOOD_WAIT detected, waiting %v seconds (attempt %d/%d)\n", waitDuration.Seconds(), attempt+1, maxRetries)
+
+			// Wait for the required duration plus a small buffer
+			timer := time.NewTimer(waitDuration + time.Second)
+			select {
+			case <-timer.C:
+				// Continue to retry
+				continue
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			}
+		} else {
+			// Not a FLOOD_WAIT error, return immediately
 			return fmt.Errorf("send: %w", err)
 		}
-	} else if qEntry.OrigChannelMsgUpdate != nil {
-		// Channel message
-		if _, err := telegramSender.Answer(qEntry.OrigEntities, qEntry.OrigChannelMsgUpdate).Media(ctx, document); err != nil {
-			return fmt.Errorf("send: %w", err)
-		}
-	} else {
-		return fmt.Errorf("no valid update found in queue entry")
 	}
 
-	return nil
+	return fmt.Errorf("failed to send media after %d attempts due to rate limiting", maxRetries)
 }
