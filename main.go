@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/url"
 	"os"
@@ -65,6 +66,35 @@ func handleCmdDLPCancel(ctx context.Context, msgCtx *MessageContext, messageText
 	dlQueue.CancelCurrentEntryFromContext(ctx, msgCtx, messageText)
 }
 
+// checkTroll checks if user should be trolled and returns troll message if so
+func checkTroll(ctx context.Context, msgCtx *MessageContext) bool {
+	// Check if trolling is configured
+	if len(params.TrollUserIDs) == 0 || len(params.TrollSentences) == 0 || params.TrollProbability == 0 {
+		return false
+	}
+
+	// Check if user is in troll list
+	if !slices.Contains(params.TrollUserIDs, msgCtx.FromUserID) {
+		return false
+	}
+
+	// Roll the dice - generate random number 1-100
+	if rand.Intn(100)+1 > params.TrollProbability {
+		return false
+	}
+
+	// Select random troll sentence
+	trollSentence := params.TrollSentences[rand.Intn(len(params.TrollSentences))]
+
+	fromUsername := getFromUsername(msgCtx.Entities, msgCtx.FromUserID)
+	fmt.Printf("  trolling user %s#%d with: %s\n", fromUsername, msgCtx.FromUserID, trollSentence)
+
+	// Send troll message
+	_, _ = msgCtx.ReplyBuilder().Text(ctx, trollSentence)
+
+	return true
+}
+
 func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 	if msgCtx.IsOutgoing {
 		// Outgoing message, not interesting.
@@ -92,6 +122,11 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 			fmt.Println("  user not allowed, ignoring")
 			return nil
 		}
+	}
+
+	// Check for troll before processing commands or URLs
+	if checkTroll(ctx, msgCtx) {
+		return nil
 	}
 
 	// Check if message is a command.

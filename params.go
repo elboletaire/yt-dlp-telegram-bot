@@ -21,6 +21,10 @@ type paramsType struct {
 	AdminUserIDs    []int64
 	AllowedGroupIDs []int64
 
+	TrollUserIDs     []int64
+	TrollSentences   []string
+	TrollProbability int // 0-100
+
 	MaxSize int64
 }
 
@@ -42,6 +46,11 @@ func (p *paramsType) Init() error {
 	flag.StringVar(&adminUserIDs, "admin-user-ids", "", "admin telegram user ids")
 	var allowedGroupIDs string
 	flag.StringVar(&allowedGroupIDs, "allowed-group-ids", "", "allowed telegram group ids")
+	var trollUserIDs string
+	flag.StringVar(&trollUserIDs, "troll-user-ids", "", "telegram user ids to troll")
+	var trollSentences string
+	flag.StringVar(&trollSentences, "troll-sentences", "", "comma-separated list of troll sentences")
+	flag.IntVar(&p.TrollProbability, "troll-probability", 0, "probability (0-100) of trolling")
 	var maxSize string
 	flag.StringVar(&maxSize, "max-size", "", "allowed max size of video files")
 	flag.Parse()
@@ -125,6 +134,48 @@ func (p *paramsType) Init() error {
 			return fmt.Errorf("allowed group ids contains invalid group ID: " + idStr)
 		}
 		p.AllowedGroupIDs = append(p.AllowedGroupIDs, id)
+	}
+
+	if trollUserIDs == "" {
+		trollUserIDs = os.Getenv("TROLL_USERIDS")
+	}
+	sa = strings.Split(trollUserIDs, ",")
+	for _, idStr := range sa {
+		if idStr == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return fmt.Errorf("troll user ids contains invalid user ID: " + idStr)
+		}
+		p.TrollUserIDs = append(p.TrollUserIDs, id)
+	}
+
+	if trollSentences == "" {
+		trollSentences = os.Getenv("TROLL_SENTENCES")
+	}
+	if trollSentences != "" {
+		sentences := strings.Split(trollSentences, ",")
+		for _, sentence := range sentences {
+			sentence = strings.TrimSpace(sentence)
+			if sentence != "" {
+				p.TrollSentences = append(p.TrollSentences, sentence)
+			}
+		}
+	}
+
+	if p.TrollProbability == 0 {
+		if probStr := os.Getenv("TROLL_PROBABILITY"); probStr != "" {
+			prob, err := strconv.Atoi(probStr)
+			if err != nil {
+				return fmt.Errorf("invalid troll probability: %w", err)
+			}
+			p.TrollProbability = prob
+		}
+	}
+
+	if p.TrollProbability < 0 || p.TrollProbability > 100 {
+		return fmt.Errorf("troll probability must be between 0 and 100")
 	}
 
 	if maxSize == "" {
