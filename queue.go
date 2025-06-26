@@ -85,7 +85,6 @@ type currentlyDownloadedEntryType struct {
 	lastProgressPercent          int
 	lastDisplayedProgressPercent int
 	progressUpdateTimer          *time.Timer
-	successMessageShown          bool // Prevents any updates after success message
 
 	sourceCodecInfo string
 	progressInfo    string
@@ -256,34 +255,9 @@ func (q *DownloadQueue) updateProgress(ctx context.Context, qEntry *DownloadQueu
 	q.currentlyDownloadedEntry.lastDisplayedProgressPercent = progressPercent
 }
 
-// forceUpdateProgress bypasses all rate limiting and timers to guarantee message delivery
-func (q *DownloadQueue) forceUpdateProgress(ctx context.Context, qEntry *DownloadQueueEntry, message string) {
-	// Cancel any pending timers first
-	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
-	if q.currentlyDownloadedEntry.progressUpdateTimer != nil {
-		q.currentlyDownloadedEntry.progressUpdateTimer.Stop()
-		select {
-		case <-q.currentlyDownloadedEntry.progressUpdateTimer.C:
-		default:
-		}
-		q.currentlyDownloadedEntry.progressUpdateTimer = nil
-	}
-	// Mark that success message has been shown
-	q.currentlyDownloadedEntry.successMessageShown = true
-	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
-
-	// Direct edit, bypassing all rate limiting
-	qEntry.editReply(ctx, message)
-}
-
 func (q *DownloadQueue) HandleProgressPercentUpdate(progressStr string, progressPercent int) {
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
 	defer q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
-
-	// Block all updates after success message has been shown
-	if q.currentlyDownloadedEntry.successMessageShown {
-		return
-	}
 
 	if q.currentlyDownloadedEntry.disableProgressPercentUpdate || q.currentlyDownloadedEntry.lastProgressPercent == progressPercent {
 		return
@@ -418,8 +392,8 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	} else {
 		fmt.Print("  success!\n")
 
-		// Force the success message, bypassing all rate limiting
-		q.forceUpdateProgress(ctx, qEntry, "✅ Upload complete!")
+		// Simple success message - just edit directly
+		qEntry.editReply(ctx, "✅ Upload complete!")
 
 		// Wait a moment then properly delete the progress message
 		go func() {
