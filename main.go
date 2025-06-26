@@ -24,12 +24,14 @@ var telegramUploader *uploader.Uploader
 var telegramSender *message.Sender
 
 type MessageContext struct {
-	MessageText  string
-	IsOutgoing   bool
-	Entities     tg.Entities
-	FromUserID   int64
-	FromGroupID  *int64 // nil if not from group
-	ReplyBuilder func() *message.Builder
+	MessageText          string
+	IsOutgoing           bool
+	Entities             tg.Entities
+	FromUserID           int64
+	FromGroupID          *int64 // nil if not from group
+	ReplyBuilder         func() *message.Builder
+	OrigMsgUpdate        *tg.UpdateNewMessage        // for regular messages
+	OrigChannelMsgUpdate *tg.UpdateNewChannelMessage // for channel messages
 }
 
 func handleCmdDLP(ctx context.Context, msgCtx *MessageContext, messageText string) {
@@ -146,12 +148,13 @@ func handleMsg(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage
 	}
 
 	msgCtx := &MessageContext{
-		MessageText:  msg.Message,
-		IsOutgoing:   msg.Out,
-		Entities:     entities,
-		FromUserID:   fromUser.UserID,
-		FromGroupID:  fromGroupID,
-		ReplyBuilder: func() *message.Builder { return telegramSender.Reply(entities, u) },
+		MessageText:   msg.Message,
+		IsOutgoing:    msg.Out,
+		Entities:      entities,
+		FromUserID:    fromUser.UserID,
+		FromGroupID:   fromGroupID,
+		ReplyBuilder:  func() *message.Builder { return telegramSender.Reply(entities, u) },
+		OrigMsgUpdate: u,
 	}
 
 	return handleMessageContext(ctx, msgCtx)
@@ -172,12 +175,13 @@ func handleChannelMsg(ctx context.Context, entities tg.Entities, u *tg.UpdateNew
 	}
 
 	msgCtx := &MessageContext{
-		MessageText:  msg.Message,
-		IsOutgoing:   msg.Out,
-		Entities:     entities,
-		FromUserID:   fromUser.UserID,
-		FromGroupID:  fromGroupID,
-		ReplyBuilder: func() *message.Builder { return telegramSender.Reply(entities, u) },
+		MessageText:          msg.Message,
+		IsOutgoing:           msg.Out,
+		Entities:             entities,
+		FromUserID:           fromUser.UserID,
+		FromGroupID:          fromGroupID,
+		ReplyBuilder:         func() *message.Builder { return telegramSender.Reply(entities, u) },
+		OrigChannelMsgUpdate: u,
 	}
 
 	return handleMessageContext(ctx, msgCtx)

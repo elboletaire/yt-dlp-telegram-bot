@@ -24,11 +24,12 @@ type DownloadQueueEntry struct {
 	URL    string
 	Format string
 
-	OrigEntities  tg.Entities
-	OrigMsgUpdate *tg.UpdateNewMessage
-	OrigMsg       *tg.Message
-	FromUser      *tg.PeerUser
-	FromGroup     *tg.PeerChat
+	OrigEntities         tg.Entities
+	OrigMsgUpdate        *tg.UpdateNewMessage
+	OrigChannelMsgUpdate *tg.UpdateNewChannelMessage
+	OrigMsg              *tg.Message
+	FromUser             *tg.PeerUser
+	FromGroup            *tg.PeerChat
 
 	Reply    *message.Builder
 	ReplyMsg *tg.UpdateShortSentMessage
@@ -140,10 +141,12 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 	}
 
 	newEntry := DownloadQueueEntry{
-		URL:          url,
-		Format:       format,
-		OrigEntities: msgCtx.Entities,
-		OrigMsg:      mockMsg,
+		URL:                  url,
+		Format:               format,
+		OrigEntities:         msgCtx.Entities,
+		OrigMsgUpdate:        msgCtx.OrigMsgUpdate,
+		OrigChannelMsgUpdate: msgCtx.OrigChannelMsgUpdate,
+		OrigMsg:              mockMsg,
 	}
 
 	// Set up user/group info
@@ -288,7 +291,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	q.updateProgress(ctx, qEntry, processStr, q.currentlyDownloadedEntry.lastProgressPercent)
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 
-	err = dlUploader.UploadFile(qEntry.Ctx, qEntry.OrigEntities, qEntry.OrigMsgUpdate, r, outputFormat, title)
+	err = dlUploader.UploadFileFromEntry(qEntry.Ctx, qEntry, r, outputFormat, title)
 	if err != nil {
 		fmt.Println("  error processing:", err)
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
