@@ -1,2 +1,4 @@
 /config.inc.sh
 /yt-dlp-telegram-bot
+*.env
+!.env.example
