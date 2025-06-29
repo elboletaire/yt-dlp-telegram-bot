@@ -65,7 +65,7 @@ func (e *DownloadQueueEntry) editReply(ctx context.Context, s string) {
 	e.sendTypingAction(ctx)
 }
 
-func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, s string, deleteAfter time.Duration) {
+func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, qEntry *DownloadQueueEntry, s string, deleteAfter time.Duration) {
 	e.editReply(ctx, s)
 	if deleteAfter > 0 {
 		go func() {
@@ -73,7 +73,13 @@ func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, s stri
 			// Try to delete the message after the specified duration
 			e.editReply(ctx, "🗑️ Message deleted")
 			time.Sleep(1 * time.Second)
-			e.editReply(ctx, "")
+			_, err := telegramSender.Self().Revoke().Messages(ctx, qEntry.ProgressMsgID)
+			if err != nil {
+				fmt.Println("  error deleting progress message:", err)
+			} else {
+				fmt.Println("  progress message deleted successfully!")
+			}
+
 		}()
 	}
 }
@@ -358,7 +364,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		q.currentlyDownloadedEntry.disableProgressPercentUpdate = true
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 		// Show error and auto-delete after 10 seconds
-		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(errorStr+": ", err), 10*time.Second)
+		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(errorStr+": ", err), 10*time.Second)
 		return
 	}
 
@@ -376,7 +382,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 		r.Close()
 		// Show error and auto-delete after 10 seconds
-		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(errorStr+": ", err), 10*time.Second)
+		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(errorStr+": ", err), 10*time.Second)
 		return
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
@@ -388,7 +394,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	if qEntry.Canceled {
 		fmt.Print("  canceled\n")
 		// Show canceled message and auto-delete after 5 seconds
-		qEntry.editReplyWithAutoDelete(ctx, fmt.Sprint(canceledStr, " by user"), 5*time.Second)
+		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(canceledStr, " by user"), 5*time.Second)
 	} else {
 		fmt.Print("  success!\n")
 
