@@ -68,7 +68,7 @@ func (p *Uploader) UploadFile(ctx context.Context, entities tg.Entities, u *tg.U
 	return nil
 }
 
-func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueueEntry, f io.ReadCloser, format, title string) error {
+func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueueEntry, f io.ReadCloser, format, title string, videoMetadata *VideoMetadata) error {
 	// Reading to a buffer first, because we don't know the file size.
 	var buf bytes.Buffer
 	for {
@@ -100,7 +100,20 @@ func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueu
 	if format == "mp3" {
 		document = message.UploadedDocument(upload).Filename(filename).Audio().Title(title)
 	} else {
-		document = message.UploadedDocument(upload).Filename(filename).Video()
+		// Create video document with metadata if available
+		uploadedDoc := message.UploadedDocument(upload).Filename(filename)
+		videoDoc := uploadedDoc.Video()
+
+		// Add video metadata if available
+		if videoMetadata != nil {
+			fmt.Printf("  adding video metadata: %dx%d, duration: %ds\n", videoMetadata.Width, videoMetadata.Height, videoMetadata.Duration)
+			videoDoc = videoDoc.Resolution(videoMetadata.Width, videoMetadata.Height)
+			if videoMetadata.Duration > 0 {
+				videoDoc = videoDoc.Duration(time.Duration(videoMetadata.Duration) * time.Second)
+			}
+		}
+
+		document = videoDoc
 	}
 
 	// Sending message with media - handle both regular and channel messages with FLOOD_WAIT retry

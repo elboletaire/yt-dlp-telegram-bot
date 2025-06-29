@@ -24,9 +24,17 @@ const maxFFmpegProbeBytes = 20 * 1024 * 1024
 var compatibleVideoCodecs = []string{"h264", "vp9", "hevc"}
 var compatibleAudioCodecs = []string{"aac", "opus", "mp3"}
 
+type VideoMetadata struct {
+	Width    int
+	Height   int
+	Duration int // in seconds
+}
+
 type ffmpegProbeDataStreamsStream struct {
 	CodecName string `json:"codec_name"`
 	CodecType string `json:"codec_type"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
 }
 
 type ffmpegProbeDataFormat struct {
@@ -53,6 +61,8 @@ type Converter struct {
 	Duration float64
 
 	UpdateProgressPercentCallback UpdateProgressPercentCallbackFunc
+
+	VideoMetadata *VideoMetadata
 }
 
 func (c *Converter) Probe(rr *ReReadCloser) error {
@@ -107,6 +117,16 @@ func (c *Converter) Probe(rr *ReReadCloser) error {
 					fmt.Println("    found video codec:", stream.CodecName)
 				}
 				gotVideoStream = true
+
+				// Capture video metadata from the first video stream
+				if c.VideoMetadata == nil && stream.Width > 0 && stream.Height > 0 {
+					c.VideoMetadata = &VideoMetadata{
+						Width:    stream.Width,
+						Height:   stream.Height,
+						Duration: int(c.Duration),
+					}
+					fmt.Printf("    found video dimensions: %dx%d, duration: %ds\n", stream.Width, stream.Height, int(c.Duration))
+				}
 			}
 		} else if stream.CodecType == "audio" {
 			if c.AudioCodecs != "" {
