@@ -89,12 +89,14 @@ func (c *Converter) Probe(rr *ReReadCloser) error {
 	}
 
 	compatibleVideoCodecsCopy := compatibleVideoCodecs
-	if c.Format == "mp3" {
-		compatibleVideoCodecsCopy = []string{}
-	}
 	compatibleAudioCodecsCopy := compatibleAudioCodecs
 	if c.Format == "mp3" {
+		compatibleVideoCodecsCopy = []string{}
 		compatibleAudioCodecsCopy = []string{"mp3"}
+	} else {
+		// Telegram's built-in player expects MP4 with H.264 video and AAC/MP3 audio.
+		compatibleVideoCodecsCopy = []string{"h264"}
+		compatibleAudioCodecsCopy = []string{"aac", "mp3"}
 	}
 
 	gotVideoStream := false
@@ -247,6 +249,10 @@ func (c *Converter) ConvertIfNeeded(ctx context.Context, rr *ReReadCloser) (read
 		}
 	} else {
 		args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:a": "copy"}})
+		// When copying AAC from TS to MP4, fix bitstream format for MP4 container.
+		if outputFormat == "mp4" {
+			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"bsf:a": "aac_adtstoasc"}})
+		}
 	}
 
 	if videoNeeded {
@@ -280,20 +286,21 @@ func (c *Converter) ConvertIfNeeded(ctx context.Context, rr *ReReadCloser) (read
 	cmd = NewCommand(ctx, ffCmd.Args[0], ffCmd.Args[1:]...)
 	cmd.Stdin = ffCmd.Stdin
 	cmd.Stdout = ffCmd.Stdout
+	cmd.Stderr = os.Stdout
 
 	// This goroutine handles copying from the input (either rr or cmd.Stdout) to writer.
 	go func() {
-		err = cmd.Run()
-		writer.Close()
+		runErr := cmd.Run()
 		if progressSock != nil {
 			progressSock.Close()
 		}
+		if runErr != nil {
+			fmt.Println("  ffmpeg error:", runErr)
+			_ = writer.CloseWithError(runErr)
+			return
+		}
+		_ = writer.Close()
 	}()
-
-	if err != nil {
-		writer.Close()
-		return nil, outputFormat, fmt.Errorf("error converting: %w", err)
-	}
 
 	return reader, outputFormat, nil
 }
