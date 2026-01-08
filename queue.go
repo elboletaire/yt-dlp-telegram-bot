@@ -84,6 +84,26 @@ func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, qEntry
 	}
 }
 
+func (e *DownloadQueueEntry) deleteProgressMessage(ctx context.Context) {
+	if e.ProgressMsgID == 0 {
+		return
+	}
+
+	var err error
+	if e.FromGroup != nil {
+		peer := &tg.InputPeerChat{ChatID: e.FromGroup.ChatID}
+		_, err = telegramSender.To(peer).Revoke().Messages(ctx, e.ProgressMsgID)
+	} else {
+		_, err = telegramSender.Self().Revoke().Messages(ctx, e.ProgressMsgID)
+	}
+
+	if err != nil {
+		fmt.Println("  error deleting progress message:", err)
+	} else {
+		fmt.Println("  progress message deleted successfully!")
+	}
+}
+
 type currentlyDownloadedEntryType struct {
 	disableProgressPercentUpdate bool
 	progressPercentUpdateMutex   sync.Mutex
@@ -397,33 +417,6 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(canceledStr, " by user"), 5*time.Second)
 	} else {
 		fmt.Print("  success!\n")
-
-		// Simple success message - just edit directly
-		qEntry.editReply(ctx, "✅ Upload complete!")
-
-		// Wait a moment then properly delete the progress message
-		go func() {
-			time.Sleep(3 * time.Second)
-			fmt.Printf("  deleting progress message ID: %d\n", qEntry.ProgressMsgID)
-
-			var err error
-			if qEntry.FromGroup != nil {
-				// Group message - need peer context for deletion
-				fmt.Printf("  deleting from group chat ID: %d\n", qEntry.FromGroup.ChatID)
-				peer := &tg.InputPeerChat{ChatID: qEntry.FromGroup.ChatID}
-				_, err = telegramSender.To(peer).Revoke().Messages(ctx, qEntry.ProgressMsgID)
-			} else {
-				// DM - use Self() for private chats
-				fmt.Println("  deleting from private chat")
-				_, err = telegramSender.Self().Revoke().Messages(ctx, qEntry.ProgressMsgID)
-			}
-
-			if err != nil {
-				fmt.Println("  error deleting progress message:", err)
-			} else {
-				fmt.Println("  progress message deleted successfully!")
-			}
-		}()
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 	qEntry.sendTypingCancelAction(ctx)

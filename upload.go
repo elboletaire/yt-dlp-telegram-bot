@@ -11,6 +11,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flytam/filenamify"
 	"github.com/gotd/td/telegram/message"
+	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
@@ -96,9 +97,11 @@ func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueu
 
 	// Now we have uploaded file handle, sending it as styled message. First, preparing message.
 	var document message.MediaOption
+	var editDocument message.MediaOption
 	filename, _ := filenamify.Filenamify(title+"."+format, filenamify.Options{Replacement: " "})
 	if format == "mp3" {
 		document = message.UploadedDocument(upload).Filename(filename).Audio().Title(title)
+		editDocument = message.UploadedDocument(upload, styling.Plain(" ")).Filename(filename).Audio().Title(title)
 	} else {
 		// Create video document with metadata if available
 		uploadedDoc := message.UploadedDocument(upload).Filename(filename)
@@ -114,10 +117,67 @@ func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueu
 		}
 
 		document = videoDoc
+		uploadedDocForEdit := message.UploadedDocument(upload, styling.Plain(" ")).Filename(filename)
+		editVideoDoc := uploadedDocForEdit.Video()
+		if videoMetadata != nil {
+			editVideoDoc = editVideoDoc.Resolution(videoMetadata.Width, videoMetadata.Height)
+			if videoMetadata.Duration > 0 {
+				editVideoDoc = editVideoDoc.Duration(time.Duration(videoMetadata.Duration) * time.Second)
+			}
+		}
+		editDocument = editVideoDoc
 	}
 
-	// Sending message with media - handle both regular and channel messages with FLOOD_WAIT retry
-	return p.sendMediaWithRetry(ctx, qEntry, document)
+	dlQueue.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
+	dlQueue.currentlyDownloadedEntry.disableProgressPercentUpdate = true
+	dlQueue.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
+
+	if err := p.editMediaWithRetry(ctx, qEntry, editDocument); err == nil {
+		return nil
+	} else {
+		fmt.Println("  edit failed, falling back to sending media:", err)
+	}
+
+	if err := p.sendMediaWithRetry(ctx, qEntry, document); err != nil {
+		return err
+	}
+
+	// Best-effort cleanup of the old progress message to avoid duplicates.
+	qEntry.deleteProgressMessage(ctx)
+	return nil
+}
+
+// editMediaWithRetry edits the progress message into a media message with FLOOD_WAIT retry handling.
+func (p *Uploader) editMediaWithRetry(ctx context.Context, qEntry *DownloadQueueEntry, document message.MediaOption) error {
+	if qEntry.ProgressMsgID == 0 {
+		return fmt.Errorf("no progress message ID to edit")
+	}
+
+	maxRetries := 3
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		_, err := qEntry.Reply.Edit(qEntry.ProgressMsgID).Media(ctx, document)
+		if err == nil {
+			return nil
+		}
+
+		if waitDuration, isFloodWait := tgerr.AsFloodWait(err); isFloodWait {
+			fmt.Printf("  FLOOD_WAIT detected while editing, waiting %v seconds (attempt %d/%d)\n", waitDuration.Seconds(), attempt+1, maxRetries)
+
+			timer := time.NewTimer(waitDuration + time.Second)
+			select {
+			case <-timer.C:
+				continue
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			}
+		} else {
+			return fmt.Errorf("edit: %w", err)
+		}
+	}
+
+	return fmt.Errorf("failed to edit media after %d attempts due to rate limiting", maxRetries)
 }
 
 // sendMediaWithRetry sends media with automatic FLOOD_WAIT retry handling
