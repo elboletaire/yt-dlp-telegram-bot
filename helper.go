@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gotd/td/tg"
 )
@@ -71,4 +72,12 @@ func sendTextToAdmins(ctx context.Context, msg string) {
 			UserID: id,
 		}).Text(ctx, msg)
 	}
+}
+
+func isYouTubeExtractor(extractor string) bool {
+	if extractor == "" {
+		return false
+	}
+	name := strings.ToLower(extractor)
+	return strings.Contains(name, "youtube")
 }

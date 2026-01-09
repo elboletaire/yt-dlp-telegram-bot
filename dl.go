@@ -26,7 +26,7 @@ func (l goYouTubeDLLogger) Print(v ...interface{}) {
 	fmt.Println(v...)
 }
 
-func (d *Downloader) downloadURL(dlCtx context.Context, url string) (rr *ReReadCloser, title string, err error) {
+func (d *Downloader) downloadURL(dlCtx context.Context, url string) (rr *ReReadCloser, title, extractor string, err error) {
 	result, err := goutubedl.New(dlCtx, url, goutubedl.Options{
 		Type:     goutubedl.TypeSingle,
 		DebugLog: goYouTubeDLLogger{},
@@ -35,19 +35,19 @@ func (d *Downloader) downloadURL(dlCtx context.Context, url string) (rr *ReReadC
 		SortingFormat:     "res:720", // Prefer videos no larger than 720p to keep their size small.
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("preparing download %q: %w", url, err)
+		return nil, "", "", fmt.Errorf("preparing download %q: %w", url, err)
 	}
 
 	dlResult, err := result.Download(dlCtx, "")
 	if err != nil {
-		return nil, "", fmt.Errorf("downloading %q: %w", url, err)
+		return nil, "", "", fmt.Errorf("downloading %q: %w", url, err)
 	}
 
-	return NewReReadCloser(dlResult), result.Info.Title, nil
+	return NewReReadCloser(dlResult), result.Info.Title, result.Info.Extractor, nil
 }
 
 func (d *Downloader) DownloadAndConvertURL(ctx context.Context, url, format string) (r io.ReadCloser, outputFormat, title string, videoMetadata *VideoMetadata, err error) {
-	rr, title, err := d.downloadURL(ctx, url)
+	rr, title, extractor, err := d.downloadURL(ctx, url)
 	if err != nil {
 		return nil, "", "", nil, err
 	}
@@ -55,6 +55,9 @@ func (d *Downloader) DownloadAndConvertURL(ctx context.Context, url, format stri
 	conv := Converter{
 		Format:                        format,
 		UpdateProgressPercentCallback: d.UpdateProgressPercentFunc,
+	}
+	if isYouTubeExtractor(extractor) {
+		conv.ForceReencode = true
 	}
 
 	if err := conv.Probe(rr); err != nil {

@@ -50,6 +50,8 @@ type ffmpegProbeData struct {
 type Converter struct {
 	Format string
 
+	ForceReencode bool
+
 	VideoCodecs             string
 	VideoConvertNeeded      bool
 	SingleVideoStreamNeeded bool
@@ -155,6 +157,11 @@ func (c *Converter) Probe(rr *ReReadCloser) error {
 		return fmt.Errorf("no video stream found in file")
 	}
 
+	if c.ForceReencode && c.Format != "mp3" {
+		c.VideoConvertNeeded = true
+		c.AudioConvertNeeded = true
+	}
+
 	return nil
 }
 
@@ -230,10 +237,15 @@ func (c *Converter) ConvertIfNeeded(ctx context.Context, rr *ReReadCloser) (read
 	args := ffmpeg_go.KwArgs{"format": outputFormat}
 
 	if videoNeeded {
-		args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"movflags": "frag_keyframe+empty_moov+faststart"}})
+		movflags := "frag_keyframe+empty_moov+faststart"
+		if c.ForceReencode {
+			// Output goes to a non-seekable pipe, so keep fragmented MP4 flags.
+			movflags = "frag_keyframe+empty_moov"
+		}
+		args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"movflags": movflags}})
 
 		if c.VideoConvertNeeded {
-			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:v": "libx264", "crf": 30, "preset": "veryfast"}})
+			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:v": "libx264", "crf": 30, "preset": "veryfast", "pix_fmt": "yuv420p"}})
 		} else {
 			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:v": "copy"}})
 		}
@@ -244,6 +256,8 @@ func (c *Converter) ConvertIfNeeded(ctx context.Context, rr *ReReadCloser) (read
 	if c.AudioConvertNeeded {
 		if c.Format == "mp3" {
 			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:a": "mp3", "b:a": "320k"}})
+		} else if c.ForceReencode {
+			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:a": "aac", "b:a": "128k"}})
 		} else {
 			args = ffmpeg_go.MergeKwArgs([]ffmpeg_go.KwArgs{args, {"c:a": "mp3", "q:a": 0}})
 		}
