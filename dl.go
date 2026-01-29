@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/wader/goutubedl"
@@ -43,7 +44,31 @@ func (d *Downloader) downloadURL(dlCtx context.Context, url string) (rr *ReReadC
 		return nil, "", "", fmt.Errorf("downloading %q: %w", url, err)
 	}
 
-	return NewReReadCloser(dlResult), result.Info.Title, result.Info.Extractor, nil
+	tmpFile, err := os.CreateTemp("", "yt-dlp-telegram-bot-*")
+	if err != nil {
+		_ = dlResult.Close()
+		return nil, "", "", fmt.Errorf("creating temp file for %q: %w", url, err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := io.Copy(tmpFile, dlResult); err != nil {
+		_ = dlResult.Close()
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return nil, "", "", fmt.Errorf("writing temp file for %q: %w", url, err)
+	}
+	if err := dlResult.Close(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return nil, "", "", fmt.Errorf("closing downloader for %q: %w", url, err)
+	}
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return nil, "", "", fmt.Errorf("rewinding temp file for %q: %w", url, err)
+	}
+
+	return NewReReadCloser(&tempFileReadCloser{File: tmpFile, path: tmpPath}), result.Info.Title, result.Info.Extractor, nil
 }
 
 func (d *Downloader) DownloadAndConvertURL(ctx context.Context, url, format string) (r io.ReadCloser, outputFormat, title string, videoMetadata *VideoMetadata, err error) {

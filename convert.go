@@ -74,13 +74,27 @@ func (c *Converter) Probe(rr *ReReadCloser) error {
 	}()
 
 	fmt.Println("  probing file...")
+	if named, ok := rr.ReadCloser.(interface{ Name() string }); ok {
+		if filename := named.Name(); filename != "" {
+			i, err := ffmpeg_go.ProbeWithTimeout(filename, probeTimeout, nil)
+			if err == nil {
+				return c.parseProbeResult(i)
+			}
+			fmt.Println("    ffprobe file error, falling back to stream:", err)
+		}
+	}
+
 	i, err := ffmpeg_go.ProbeReaderWithTimeout(io.LimitReader(rr, maxFFmpegProbeBytes), probeTimeout, nil)
 	if err != nil {
 		return fmt.Errorf("error probing file: %w", err)
 	}
 
+	return c.parseProbeResult(i)
+}
+
+func (c *Converter) parseProbeResult(i string) error {
 	pd := ffmpegProbeData{}
-	err = json.Unmarshal([]byte(i), &pd)
+	err := json.Unmarshal([]byte(i), &pd)
 	if err != nil {
 		return fmt.Errorf("error decoding probe result: %w", err)
 	}
