@@ -23,6 +23,8 @@ var dlQueue DownloadQueue
 
 var telegramUploader *uploader.Uploader
 var telegramSender *message.Sender
+var telegramClient *telegram.Client
+var telegramAPI *tg.Client
 
 type MessageContext struct {
 	MessageText          string
@@ -261,6 +263,8 @@ func main() {
 		}
 
 		api := client.API()
+		telegramClient = client
+		telegramAPI = api
 
 		telegramUploader = uploader.NewUploader(api).WithProgress(dlUploader)
 		telegramSender = message.NewSender(api).WithUploader(telegramUploader)

@@ -102,7 +102,7 @@ func (p *paramsType) Init() error {
 		}
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			return fmt.Errorf("allowed user ids contains invalid user ID: " + idStr)
+			return fmt.Errorf("allowed user ids contains invalid user ID: %s", idStr)
 		}
 		p.AllowedUserIDs = append(p.AllowedUserIDs, id)
 	}
@@ -117,7 +117,7 @@ func (p *paramsType) Init() error {
 		}
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			return fmt.Errorf("admin ids contains invalid user ID: " + idStr)
+			return fmt.Errorf("admin ids contains invalid user ID: %s", idStr)
 		}
 		p.AdminUserIDs = append(p.AdminUserIDs, id)
 		if !slices.Contains(p.AllowedUserIDs, id) {
@@ -135,7 +135,7 @@ func (p *paramsType) Init() error {
 		}
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			return fmt.Errorf("allowed group ids contains invalid group ID: " + idStr)
+			return fmt.Errorf("allowed group ids contains invalid group ID: %s", idStr)
 		}
 		p.AllowedGroupIDs = append(p.AllowedGroupIDs, id)
 	}
@@ -150,7 +150,7 @@ func (p *paramsType) Init() error {
 		}
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			return fmt.Errorf("troll user ids contains invalid user ID: " + idStr)
+			return fmt.Errorf("troll user ids contains invalid user ID: %s", idStr)
 		}
 		p.TrollUserIDs = append(p.TrollUserIDs, id)
 	}

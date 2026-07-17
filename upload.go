@@ -132,10 +132,14 @@ func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueu
 	dlQueue.currentlyDownloadedEntry.disableProgressPercentUpdate = true
 	dlQueue.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 
-	if err := p.editMediaWithRetry(ctx, qEntry, editDocument); err == nil {
-		return nil
-	} else {
-		fmt.Println("  edit failed, falling back to sending media:", err)
+	// With an ephemeral progress message there is nothing public to edit into
+	// the final media; the video is always sent as a normal reply instead.
+	if qEntry.Ephemeral == nil {
+		if err := p.editMediaWithRetry(ctx, qEntry, editDocument); err == nil {
+			return nil
+		} else {
+			fmt.Println("  edit failed, falling back to sending media:", err)
+		}
 	}
 
 	if err := p.sendMediaWithRetry(ctx, qEntry, document); err != nil {

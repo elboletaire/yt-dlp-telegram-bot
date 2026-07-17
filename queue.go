@@ -36,6 +36,11 @@ type DownloadQueueEntry struct {
 	ReplyMsg      *tg.UpdateShortSentMessage
 	ProgressMsgID int // ID of our progress message (to be deleted later)
 
+	// Ephemeral progress message shown only to the requester in group chats.
+	// When set, all progress/error texts go through it instead of a public
+	// reply, and expiration is handled by Telegram.
+	Ephemeral *EphemeralProgress
+
 	Ctx       context.Context
 	CtxCancel context.CancelFunc
 	Canceled  bool
@@ -61,12 +66,23 @@ func (e *DownloadQueueEntry) sendTypingCancelAction(ctx context.Context) {
 }
 
 func (e *DownloadQueueEntry) editReply(ctx context.Context, s string) {
+	if e.Ephemeral != nil {
+		if err := e.Ephemeral.Edit(ctx, s); err != nil {
+			fmt.Println("  error editing ephemeral progress message:", err)
+		}
+		return
+	}
 	_, _ = e.Reply.Edit(e.ReplyMsg.ID).Text(ctx, s)
 	e.sendTypingAction(ctx)
 }
 
 func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, qEntry *DownloadQueueEntry, s string, deleteAfter time.Duration) {
 	e.editReply(ctx, s)
+	if e.Ephemeral != nil {
+		// Only the requester sees the message and Telegram expires it on its
+		// own, so keep the text visible instead of deleting it.
+		return
+	}
 	if deleteAfter > 0 {
 		go func() {
 			time.Sleep(deleteAfter)
@@ -85,6 +101,13 @@ func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, qEntry
 }
 
 func (e *DownloadQueueEntry) deleteProgressMessage(ctx context.Context) {
+	if e.Ephemeral != nil {
+		if err := e.Ephemeral.Delete(ctx); err != nil {
+			fmt.Println("  error deleting ephemeral progress message:", err)
+		}
+		return
+	}
+
 	if e.ProgressMsgID == 0 {
 		return
 	}
@@ -199,6 +222,30 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 		newEntry.FromGroup = &tg.PeerChat{ChatID: -*msgCtx.FromGroupID}
 	}
 
+	// In groups/supergroups, show progress only to the requester using an
+	// ephemeral message so the chat stays clean for everyone else.
+	if peer, receiver, ok := msgCtx.ephemeralTarget(); ok {
+		eph, err := sendEphemeral(ctx, peer, receiver, replyStr)
+		if err != nil {
+			fmt.Println("  ephemeral progress message failed, falling back to public reply:", err)
+		} else {
+			newEntry.Ephemeral = eph
+		}
+	}
+	if newEntry.Ephemeral != nil {
+		newEntry.Reply = msgCtx.ReplyBuilder()
+		newEntry.ReplyMsg = &tg.UpdateShortSentMessage{}
+
+		q.entries = append(q.entries, newEntry)
+		q.mutex.Unlock()
+
+		select {
+		case q.processReqChan <- true:
+		default:
+		}
+		return
+	}
+
 	newEntry.Reply = msgCtx.ReplyBuilder()
 	replyText, _ := newEntry.Reply.Text(ctx, replyStr)
 
@@ -262,7 +309,7 @@ func (q *DownloadQueue) CancelCurrentEntryFromContext(ctx context.Context, msgCt
 		q.entries[0].CtxCancel()
 	} else {
 		fmt.Println("  no active request to cancel")
-		_, _ = msgCtx.ReplyBuilder().Text(ctx, errorStr+": no active request to cancel")
+		replyEphemeralOrPublic(ctx, msgCtx, errorStr+": no active request to cancel")
 	}
 	q.mutex.Unlock()
 }
