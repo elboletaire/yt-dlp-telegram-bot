@@ -229,8 +229,11 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 		if err != nil {
 			fmt.Println("  ephemeral progress message failed, falling back to public reply:", err)
 		} else {
+			fmt.Println("  ephemeral progress message sent, id:", eph.msgID)
 			newEntry.Ephemeral = eph
 		}
+	} else if msgCtx.FromGroupID != nil {
+		fmt.Println("  ephemeral target not resolvable for this chat, using public reply")
 	}
 	if newEntry.Ephemeral != nil {
 		newEntry.Reply = msgCtx.ReplyBuilder()
