@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,18 +29,45 @@ func (l goYouTubeDLLogger) Print(v ...interface{}) {
 }
 
 func (d *Downloader) downloadURL(dlCtx context.Context, url string) (rr *ReReadCloser, title, extractor string, err error) {
-	result, err := goutubedl.New(dlCtx, url, goutubedl.Options{
+	opts := goutubedl.Options{
 		Type:     goutubedl.TypeSingle,
 		DebugLog: goYouTubeDLLogger{},
 		// StderrFn:          func(cmd *exec.Cmd) io.Writer { return io.Writer(os.Stdout) },
 		MergeOutputFormat: "mkv",     // This handles VP9 properly. yt-dlp uses mp4 by default, which doesn't.
 		SortingFormat:     "res:720", // Prefer videos no larger than 720p to keep their size small.
-	})
+	}
+
+	result, err := goutubedl.New(dlCtx, url, opts)
+	dlOpts := goutubedl.DownloadOptions{}
+	if errors.Is(err, goutubedl.ErrNotASingleEntry) {
+		// Some links resolve to a playlist, e.g. a tweet with a video quoting
+		// another video. Its first entry is the video of the linked post
+		// itself, so retry accepting playlists and download only that one.
+		fmt.Println("  link resolves to a playlist, using its first entry")
+		opts.Type = goutubedl.TypeAny
+		result, err = goutubedl.New(dlCtx, url, opts)
+		dlOpts.PlaylistIndex = 1
+	}
 	if err != nil {
 		return nil, "", "", fmt.Errorf("preparing download %q: %w", url, err)
 	}
 
-	dlResult, err := result.Download(dlCtx, "")
+	title = result.Info.Title
+	extractor = result.Info.Extractor
+	if dlOpts.PlaylistIndex > 0 {
+		if len(result.Info.Entries) == 0 {
+			return nil, "", "", fmt.Errorf("preparing download %q: playlist contains no downloadable entries", url)
+		}
+		first := result.Info.Entries[0]
+		if first.Title != "" {
+			title = first.Title
+		}
+		if first.Extractor != "" {
+			extractor = first.Extractor
+		}
+	}
+
+	dlResult, err := result.DownloadWithOptions(dlCtx, dlOpts)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("downloading %q: %w", url, err)
 	}
@@ -68,7 +96,7 @@ func (d *Downloader) downloadURL(dlCtx context.Context, url string) (rr *ReReadC
 		return nil, "", "", fmt.Errorf("rewinding temp file for %q: %w", url, err)
 	}
 
-	return NewReReadCloser(&tempFileReadCloser{File: tmpFile, path: tmpPath}), result.Info.Title, result.Info.Extractor, nil
+	return NewReReadCloser(&tempFileReadCloser{File: tmpFile, path: tmpPath}), title, extractor, nil
 }
 
 func (d *Downloader) DownloadAndConvertURL(ctx context.Context, url, format string) (r io.ReadCloser, outputFormat, title string, videoMetadata *VideoMetadata, err error) {
