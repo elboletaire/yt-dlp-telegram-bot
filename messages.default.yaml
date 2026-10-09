@@ -1,0 +1,46 @@
+# Default English messages. Override any key with MESSAGES_FILE.
+# Values are Go text/template strings; available fields are listed per key.
+
+getting_info: "🔍 Getting information..."
+processing: "🔨 Processing"
+uploading: "☁️ Uploading"
+# Fields: .Position
+queued: "👨‍👦‍👦 Request queued at position #{{.Position}}"
+preparing_download: "🎬 Preparing download..."
+# Fields: .Video, .Audio, .Convert (all may be empty)
+source_codecs: "🎬 Source: {{.Video}}{{if .Audio}}{{if .Video}} / {{end}}{{.Audio}}{{else}}, no audio{{end}}{{if .Convert}} (converting: {{.Convert}}){{else}} (no conversion needed){{end}}"
+# Fields: .Label
+progress_unknown: "{{.Label}}... (no progress available)"
+# Fields: .Label, .Info
+progress_starting: "{{.Label}}...{{.Info}}"
+# Fields: .Label, .Bar, .Info
+progress_bar: "{{.Label}}: {{.Bar}}{{.Info}}"
+message_deleted: "🗑️ Message deleted"
+# Fields: .Err
+error: "❌ Error: {{.Err}}"
+canceled: "❌ Canceled by user"
+no_active_request: "❌ Error: no active request to cancel"
+invalid_command: "❌ Error: invalid command"
+welcome: "🤖 Welcome! This bot downloads videos from various supported sources and then re-uploads them to Telegram, so they can be viewed with Telegram's built-in video player.\n\nMore info: https://github.com/nonoo/yt-dlp-telegram-bot"
+# Fields: .Version
+bot_started: "🤖 Bot started, {{.Version}}"
+# Fields: .Version
+bot_updated: "🤖 Bot updated, {{.Version}}"
+# Fields: .Current
+ytdlp_up_to_date: "yt-dlp version: {{.Current}} (up to date)"
+# Fields: .Current, .Latest
+ytdlp_update_needed: "📢 yt-dlp version: {{.Current}} 📢 Update needed! Latest version is {{.Latest}} 📢"
+
+# Likes and best-of (only used when LIKES_ENABLED=true)
+# Fields: .Count
+like_button: "❤️ {{.Count}}"
+liked: "❤️ Liked!"
+unliked: "💔 Like removed"
+like_self: "You can't like your own video 😅"
+interval_day: "day"
+interval_week: "week"
+interval_month: "month"
+# Fields: .Interval, .Rank, .Likes, .User, .Title, .Link (.Link may be empty)
+best_of_caption: "🏆 Best of the {{.Interval}} #{{.Rank}} · {{.Likes}} ❤️ · {{.User}}{{if .Link}}\n{{.Link}}{{end}}"
+# Fields: .Interval, .Chat, .Err
+best_of_failed: "❌ Best of the {{.Interval}} failed for chat {{.Chat}}: {{.Err}}"

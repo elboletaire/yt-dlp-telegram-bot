@@ -11,6 +11,8 @@ require (
 	github.com/u2takey/ffmpeg-go v0.5.0
 	github.com/wader/goutubedl v0.0.0-20240626070646-8cef76d0c092
 	golang.org/x/exp v0.0.0-20230725093048-515e97ebf090
+	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.50.0
 )
 
 require (
@@ -38,8 +40,10 @@ require (
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/ogen-go/ogen v1.23.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/u2takey/go-utils v0.3.1 // indirect
@@ -61,5 +65,8 @@ require (
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	modernc.org/libc v1.72.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

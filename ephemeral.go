@@ -181,38 +181,47 @@ func replyEphemeralOrPublic(ctx context.Context, msgCtx *MessageContext, text st
 	_, _ = msgCtx.ReplyBuilder().Text(ctx, text)
 }
 
-// ephemeralTarget resolves the chat peer and receiver user needed to send an
-// ephemeral message for this context. Returns ok=false for direct messages
-// (ephemeral messages only exist in groups/supergroups) or when the required
-// access hashes are not present in the update entities.
-func (msgCtx *MessageContext) ephemeralTarget() (peer tg.InputPeerClass, receiver tg.InputUserClass, ok bool) {
+// chatInputPeer resolves the group/supergroup the message was sent in.
+// Returns ok=false for direct messages or when the channel access hash is
+// not present in the update entities.
+func (msgCtx *MessageContext) chatInputPeer() (peer tg.InputPeerClass, ok bool) {
 	var msg tg.MessageClass
 	if msgCtx.OrigMsgUpdate != nil {
 		msg = msgCtx.OrigMsgUpdate.Message
 	} else if msgCtx.OrigChannelMsgUpdate != nil {
 		msg = msgCtx.OrigChannelMsgUpdate.Message
 	} else {
-		return nil, nil, false
+		return nil, false
 	}
 	m, isMsg := msg.(*tg.Message)
 	if !isMsg {
-		return nil, nil, false
+		return nil, false
 	}
 
 	switch p := m.PeerID.(type) {
 	case *tg.PeerChat:
-		peer = &tg.InputPeerChat{ChatID: p.ChatID}
+		return &tg.InputPeerChat{ChatID: p.ChatID}, true
 	case *tg.PeerChannel:
 		channel, found := msgCtx.Entities.Channels[p.ChannelID]
 		if !found {
-			return nil, nil, false
+			return nil, false
 		}
-		peer = &tg.InputPeerChannel{ChannelID: channel.ID, AccessHash: channel.AccessHash}
+		return &tg.InputPeerChannel{ChannelID: channel.ID, AccessHash: channel.AccessHash}, true
 	default:
 		// Direct message: everything is private already, keep normal replies.
+		return nil, false
+	}
+}
+
+// ephemeralTarget resolves the chat peer and receiver user needed to send an
+// ephemeral message for this context. Returns ok=false for direct messages
+// (ephemeral messages only exist in groups/supergroups) or when the required
+// access hashes are not present in the update entities.
+func (msgCtx *MessageContext) ephemeralTarget() (peer tg.InputPeerClass, receiver tg.InputUserClass, ok bool) {
+	peer, ok = msgCtx.chatInputPeer()
+	if !ok {
 		return nil, nil, false
 	}
-
 	user, found := msgCtx.Entities.Users[msgCtx.FromUserID]
 	if !found {
 		return nil, nil, false

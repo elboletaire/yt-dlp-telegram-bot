@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gotd/td/telegram"
@@ -155,15 +156,13 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 		case "start":
 			fmt.Println("  (start cmd)")
 			if msgCtx.FromGroupID == nil {
-				_, _ = msgCtx.ReplyBuilder().Text(ctx, "🤖 Welcome! This bot downloads videos from various "+
-					"supported sources and then re-uploads them to Telegram, so they can be viewed with Telegram's built-in "+
-					"video player.\n\nMore info: https://github.com/nonoo/yt-dlp-telegram-bot")
+				_, _ = msgCtx.ReplyBuilder().Text(ctx, T("welcome", nil))
 			}
 			return nil
 		default:
 			fmt.Println("  (invalid cmd)")
 			if msgCtx.FromGroupID == nil {
-				_, _ = msgCtx.ReplyBuilder().Text(ctx, errorStr+": invalid command")
+				_, _ = msgCtx.ReplyBuilder().Text(ctx, T("invalid_command", nil))
 			}
 			return nil
 		}
@@ -172,6 +171,18 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 	// Process URLs for both direct messages and authorized groups
 	handleCmdDLP(ctx, msgCtx, msgCtx.MessageText)
 	return nil
+}
+
+// botReady gates update handlers until the client setup in main is done.
+var botReady atomic.Bool
+
+func whenReady[U any](h func(context.Context, tg.Entities, U) error) func(context.Context, tg.Entities, U) error {
+	return func(ctx context.Context, e tg.Entities, u U) error {
+		if !botReady.Load() {
+			return nil
+		}
+		return h(ctx, e, u)
+	}
 }
 
 func handleMsg(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage) error {
@@ -247,6 +258,14 @@ func main() {
 		panic(fmt.Sprint("options from env err: ", err))
 	}
 
+	// Handlers are registered before the client starts, as the dispatcher is
+	// not safe for concurrent use; they drop updates until setup is done.
+	dispatcher.OnNewMessage(whenReady(handleMsg))
+	dispatcher.OnNewChannelMessage(whenReady(handleChannelMsg))
+	if params.LikesEnabled {
+		dispatcher.OnBotCallbackQuery(whenReady(handleBotCallbackQuery))
+	}
+
 	client := telegram.NewClient(params.ApiID, params.ApiHash, opts)
 
 	if err := client.Run(context.Background(), func(ctx context.Context) error {
@@ -279,8 +298,19 @@ func main() {
 
 		dlQueue.Init(ctx)
 
-		dispatcher.OnNewMessage(handleMsg)
-		dispatcher.OnNewChannelMessage(handleChannelMsg)
+		if params.LikesEnabled {
+			likeStore, err = OpenStore(params.DBPath)
+			if err != nil {
+				panic(fmt.Sprint("error: ", err))
+			}
+			defer likeStore.Close()
+			fmt.Println("likes enabled, db:", params.DBPath)
+			if params.BestOf.Interval != IntervalOff {
+				go runBestOf(ctx, likeStore, params.BestOf, params.BestOfCount)
+			}
+		}
+
+		botReady.Store(true)
 
 		fmt.Println("telegram connection up")
 
@@ -292,7 +322,7 @@ func main() {
 			}
 			ytdlpVersionCheckStr, _, _ = ytdlpVersionCheckGetStr(ctx)
 		}
-		sendTextToAdmins(ctx, "🤖 Bot started, "+ytdlpVersionCheckStr)
+		sendTextToAdmins(ctx, T("bot_started", map[string]any{"Version": ytdlpVersionCheckStr}))
 
 		go func() {
 			for {
@@ -306,7 +336,7 @@ func main() {
 						panic(fmt.Sprint("error: ", err))
 					}
 					ytdlpVersionCheckStr, _, _ = ytdlpVersionCheckGetStr(ctx)
-					sendTextToAdmins(ctx, "🤖 Bot updated, "+ytdlpVersionCheckStr)
+					sendTextToAdmins(ctx, T("bot_updated", map[string]any{"Version": ytdlpVersionCheckStr}))
 				}
 			}
 		}()

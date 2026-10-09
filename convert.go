@@ -212,11 +212,11 @@ func (c *Converter) ffmpegProgressSock() (sockFilename string, sock net.Listener
 			if len(a) > 0 && len(a[len(a)-1]) > 0 {
 				data = ""
 				l, _ := strconv.Atoi(a[len(a)-1][len(a[len(a)-1])-1])
-				c.UpdateProgressPercentCallback(processStr, int(100*float64(l)/c.Duration/1000000))
+				c.UpdateProgressPercentCallback(T("processing", nil), int(100*float64(l)/c.Duration/1000000))
 			}
 
 			if strings.Contains(data, "progress=end") {
-				c.UpdateProgressPercentCallback(processStr, 100)
+				c.UpdateProgressPercentCallback(T("processing", nil), 100)
 			}
 		}
 	}()
@@ -304,7 +304,7 @@ func (c *Converter) ConvertIfNeeded(ctx context.Context, rr *ReReadCloser) (read
 				ff = ff.GlobalArgs("-progress", "unix:"+progressSockFilename)
 			}
 		} else {
-			c.UpdateProgressPercentCallback(processStr, -1)
+			c.UpdateProgressPercentCallback(T("processing", nil), -1)
 		}
 	}
 

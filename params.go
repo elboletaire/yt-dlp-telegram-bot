@@ -27,6 +27,13 @@ type paramsType struct {
 	TrollProbability int // 0-100
 
 	MaxSize int64
+
+	MessagesFile string
+
+	LikesEnabled bool
+	DBPath       string
+	BestOf       Schedule
+	BestOfCount  int
 }
 
 var params paramsType
@@ -57,6 +64,14 @@ func (p *paramsType) Init() error {
 	flag.IntVar(&p.TrollProbability, "troll-probability", 0, "probability (0-100) of trolling")
 	var maxSize string
 	flag.StringVar(&maxSize, "max-size", "", "allowed max size of video files")
+	flag.StringVar(&p.MessagesFile, "messages-file", "", "yaml file overriding bot messages")
+	flag.BoolVar(&p.LikesEnabled, "likes", false, "enable like button and best-of reposts in groups")
+	flag.StringVar(&p.DBPath, "db-path", "", "sqlite database path (default bot.db)")
+	var bestOfInterval, bestOfAt string
+	flag.StringVar(&bestOfInterval, "best-of-interval", "", "best-of interval: day, week, month or off (default week)")
+	flag.StringVar(&bestOfAt, "best-of-at", "", "best-of run time, e.g. '20:00', 'sun 20:00' or '1 20:00'")
+	var bestOfCount string
+	flag.StringVar(&bestOfCount, "best-of-count", "", "number of videos reposted in each best-of (default 3)")
 	flag.Parse()
 
 	var err error
@@ -191,6 +206,56 @@ func (p *paramsType) Init() error {
 			return fmt.Errorf("invalid max size: %w", err)
 		}
 		p.MaxSize = b.Int64()
+	}
+
+	if !p.LikesEnabled {
+		if s := os.Getenv("LIKES_ENABLED"); s != "" {
+			if p.LikesEnabled, err = strconv.ParseBool(s); err != nil {
+				return fmt.Errorf("invalid LIKES_ENABLED: %w", err)
+			}
+		}
+	}
+
+	if p.DBPath == "" {
+		p.DBPath = os.Getenv("DB_PATH")
+	}
+	if p.DBPath == "" {
+		p.DBPath = "bot.db"
+	}
+
+	if bestOfInterval == "" {
+		bestOfInterval = os.Getenv("BEST_OF_INTERVAL")
+	}
+	if bestOfInterval == "" {
+		bestOfInterval = string(IntervalWeek)
+	}
+	if bestOfAt == "" {
+		bestOfAt = os.Getenv("BEST_OF_AT")
+	}
+	if p.BestOf, err = ParseSchedule(bestOfInterval, bestOfAt); err != nil {
+		return err
+	}
+
+	if bestOfCount == "" {
+		bestOfCount = os.Getenv("BEST_OF_COUNT")
+	}
+	if bestOfCount == "" {
+		bestOfCount = "3"
+	}
+	if p.BestOfCount, err = strconv.Atoi(bestOfCount); err != nil {
+		return fmt.Errorf("invalid best-of count: %w", err)
+	}
+	if p.BestOfCount < 1 {
+		return fmt.Errorf("best-of count must be at least 1")
+	}
+
+	if p.MessagesFile == "" {
+		p.MessagesFile = os.Getenv("MESSAGES_FILE")
+	}
+	if p.MessagesFile != "" {
+		if err := LoadMessagesFile(p.MessagesFile); err != nil {
+			return err
+		}
 	}
 
 	// Writing env. var YTDLP_COOKIES contents to a file.

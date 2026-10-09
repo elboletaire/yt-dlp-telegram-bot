@@ -22,7 +22,7 @@ type Uploader struct{}
 var dlUploader Uploader
 
 func (p Uploader) Chunk(ctx context.Context, state uploader.ProgressState) error {
-	dlQueue.HandleProgressPercentUpdate(uploadStr, int(state.Uploaded*100/state.Total))
+	dlQueue.HandleProgressPercentUpdate(T("uploading", nil), int(state.Uploaded*100/state.Total))
 	return nil
 }
 
@@ -132,100 +132,98 @@ func (p *Uploader) UploadFileFromEntry(ctx context.Context, qEntry *DownloadQueu
 	dlQueue.currentlyDownloadedEntry.disableProgressPercentUpdate = true
 	dlQueue.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 
+	var markup tg.ReplyMarkupClass
+	if likeStore != nil && qEntry.ChatPeer != nil {
+		markup = likeMarkup(0)
+	}
+
 	// With an ephemeral progress message there is nothing public to edit into
 	// the final media; the video is always sent as a normal reply instead.
 	if qEntry.Ephemeral == nil {
-		if err := p.editMediaWithRetry(ctx, qEntry, editDocument); err == nil {
+		if sent, err := p.editMediaWithRetry(ctx, qEntry, editDocument, markup); err == nil {
+			recordUpload(qEntry, sent, format, title)
 			return nil
 		} else {
 			fmt.Println("  edit failed, falling back to sending media:", err)
 		}
 	}
 
-	if err := p.sendMediaWithRetry(ctx, qEntry, document); err != nil {
+	sent, err := p.sendMediaWithRetry(ctx, qEntry, document, markup)
+	if err != nil {
 		return err
 	}
+	recordUpload(qEntry, sent, format, title)
 
 	// Best-effort cleanup of the old progress message to avoid duplicates.
 	qEntry.deleteProgressMessage(ctx)
 	return nil
 }
 
-// editMediaWithRetry edits the progress message into a media message with FLOOD_WAIT retry handling.
-func (p *Uploader) editMediaWithRetry(ctx context.Context, qEntry *DownloadQueueEntry, document message.MediaOption) error {
-	if qEntry.ProgressMsgID == 0 {
-		return fmt.Errorf("no progress message ID to edit")
-	}
-
-	maxRetries := 3
-
+// withFloodRetry runs fn, waiting and retrying up to 3 times on FLOOD_WAIT.
+func withFloodRetry(ctx context.Context, what string, fn func() error) error {
+	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		_, err := qEntry.Reply.Edit(qEntry.ProgressMsgID).Media(ctx, document)
+		err := fn()
 		if err == nil {
 			return nil
 		}
-
-		if waitDuration, isFloodWait := tgerr.AsFloodWait(err); isFloodWait {
-			fmt.Printf("  FLOOD_WAIT detected while editing, waiting %v seconds (attempt %d/%d)\n", waitDuration.Seconds(), attempt+1, maxRetries)
-
-			timer := time.NewTimer(waitDuration + time.Second)
-			select {
-			case <-timer.C:
-				continue
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			}
-		} else {
-			return fmt.Errorf("edit: %w", err)
+		waitDuration, isFloodWait := tgerr.AsFloodWait(err)
+		if !isFloodWait {
+			return fmt.Errorf("%s: %w", what, err)
+		}
+		fmt.Printf("  FLOOD_WAIT detected (%s), waiting %v seconds (attempt %d/%d)\n", what, waitDuration.Seconds(), attempt+1, maxRetries)
+		timer := time.NewTimer(waitDuration + time.Second)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
 		}
 	}
-
-	return fmt.Errorf("failed to edit media after %d attempts due to rate limiting", maxRetries)
+	return fmt.Errorf("%s failed after %d attempts due to rate limiting", what, maxRetries)
 }
 
-// sendMediaWithRetry sends media with automatic FLOOD_WAIT retry handling
-func (p *Uploader) sendMediaWithRetry(ctx context.Context, qEntry *DownloadQueueEntry, document message.MediaOption) error {
-	maxRetries := 3
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		var err error
-
-		// Try to send the media as reply to original message
-		if qEntry.OrigMsgUpdate != nil {
-			// Regular message - send as reply
-			_, err = telegramSender.Reply(qEntry.OrigEntities, qEntry.OrigMsgUpdate).Media(ctx, document)
-		} else if qEntry.OrigChannelMsgUpdate != nil {
-			// Channel message - send as reply
-			_, err = telegramSender.Reply(qEntry.OrigEntities, qEntry.OrigChannelMsgUpdate).Media(ctx, document)
-		} else {
-			return fmt.Errorf("no valid update found in queue entry")
-		}
-
-		if err == nil {
-			// Success!
-			return nil
-		}
-
-		// Check if it's a FLOOD_WAIT error
-		if waitDuration, isFloodWait := tgerr.AsFloodWait(err); isFloodWait {
-			fmt.Printf("  FLOOD_WAIT detected, waiting %v seconds (attempt %d/%d)\n", waitDuration.Seconds(), attempt+1, maxRetries)
-
-			// Wait for the required duration plus a small buffer
-			timer := time.NewTimer(waitDuration + time.Second)
-			select {
-			case <-timer.C:
-				// Continue to retry
-				continue
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			}
-		} else {
-			// Not a FLOOD_WAIT error, return immediately
-			return fmt.Errorf("send: %w", err)
-		}
+// editMediaWithRetry edits the progress message into a media message with FLOOD_WAIT retry handling.
+func (p *Uploader) editMediaWithRetry(ctx context.Context, qEntry *DownloadQueueEntry, document message.MediaOption, markup tg.ReplyMarkupClass) (tg.UpdatesClass, error) {
+	if qEntry.ProgressMsgID == 0 {
+		return nil, fmt.Errorf("no progress message ID to edit")
 	}
+	var res tg.UpdatesClass
+	err := withFloodRetry(ctx, "edit", func() error {
+		// A fresh builder, so the markup doesn't stick to qEntry.Reply, which is
+		// still used for error and cancel texts afterwards.
+		reply, err := origReply(qEntry)
+		if err != nil {
+			return err
+		}
+		res, err = reply.Markup(markup).Edit(qEntry.ProgressMsgID).Media(ctx, document)
+		return err
+	})
+	return res, err
+}
 
-	return fmt.Errorf("failed to send media after %d attempts due to rate limiting", maxRetries)
+// sendMediaWithRetry sends media as a reply to the original message with FLOOD_WAIT retry handling.
+func (p *Uploader) sendMediaWithRetry(ctx context.Context, qEntry *DownloadQueueEntry, document message.MediaOption, markup tg.ReplyMarkupClass) (tg.UpdatesClass, error) {
+	var res tg.UpdatesClass
+	err := withFloodRetry(ctx, "send", func() error {
+		reply, err := origReply(qEntry)
+		if err != nil {
+			return err
+		}
+		res, err = reply.Markup(markup).Media(ctx, document)
+		return err
+	})
+	return res, err
+}
+
+// origReply returns a new builder replying to the request's original message.
+func origReply(qEntry *DownloadQueueEntry) (*message.Builder, error) {
+	switch {
+	case qEntry.OrigMsgUpdate != nil:
+		return telegramSender.Reply(qEntry.OrigEntities, qEntry.OrigMsgUpdate), nil
+	case qEntry.OrigChannelMsgUpdate != nil:
+		return telegramSender.Reply(qEntry.OrigEntities, qEntry.OrigChannelMsgUpdate), nil
+	default:
+		return nil, fmt.Errorf("no valid update found in queue entry")
+	}
 }

@@ -81,11 +81,45 @@ variable. Available OS environment variables are:
 - `ALLOWED_GROUPIDS`
 - `MAX_SIZE`
 - `YTDLP_COOKIES`
+- `LIKES_ENABLED`
+- `DB_PATH`
+- `BEST_OF_INTERVAL`
+- `BEST_OF_AT`
+- `BEST_OF_COUNT`
+- `MESSAGES_FILE`
 
 The contents of the `YTDLP_COOKIES` environment variable will be written to the
 file `/tmp/ytdlp-cookies.txt`. This will be used by `yt-dlp` if it is running
 in a docker container, as the `yt-dlp.conf` file in the container points to this
 cookie file.
+
+## Likes and "Best of"
+
+Set `-likes` (or `LIKES_ENABLED=true`) to add a ❤️ button under every video
+the bot uploads in a group. Members can tap it to like or unlike a video; the
+person who requested the video can't like their own.
+
+Periodically, the bot reposts the most liked videos of each group with a
+"🏆 Best of the week" caption. Configure it with:
+
+- `BEST_OF_INTERVAL`: `day`, `week` (default), `month` or `off`
+- `BEST_OF_AT`: when to post, in the container's `TZ`: `20:00` for daily,
+  `sun 20:00` for weekly (default), `1 20:00` for monthly (days 1-28)
+- `BEST_OF_COUNT`: how many videos to repost (default 3)
+
+If the bot was down when a digest was due, it posts the missed ones (up to the
+last 3 per group) once it's back.
+
+Likes are stored in an SQLite database at `DB_PATH` (default `bot.db`). When
+using Docker, put it on a volume, e.g. `-v ./data:/data -e DB_PATH=/data/bot.db`.
+
+## Messages
+
+Every message the bot sends can be changed, e.g. to translate the bot. Copy
+the keys you want to change from [messages.default.yaml](messages.default.yaml)
+into a new YAML file and point `MESSAGES_FILE` (or `-messages-file`) to it.
+Messages are [Go templates](https://pkg.go.dev/text/template); the available
+fields are documented next to each key.
 
 ## Supported commands
 

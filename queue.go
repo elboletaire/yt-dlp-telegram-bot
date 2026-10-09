@@ -10,12 +10,6 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-const processStartStr = "🔍 Getting information..."
-const processStr = "🔨 Processing"
-const uploadStr = "☁️ Uploading"
-const errorStr = "❌ Error"
-const canceledStr = "❌ Canceled"
-
 const maxProgressPercentUpdateInterval = time.Second
 const maxProgressPercentUpdateIntervalGroup = 5 * time.Second // Slower updates for groups/channels
 const progressBarLength = 10
@@ -31,6 +25,11 @@ type DownloadQueueEntry struct {
 	OrigMsg              *tg.Message
 	FromUser             *tg.PeerUser
 	FromGroup            *tg.PeerChat
+
+	// Chat the request came from, set only for groups/supergroups. Used to
+	// delete progress messages and to record uploads for likes and best-of.
+	ChatPeer     tg.InputPeerClass
+	FromUserName string
 
 	Reply         *message.Builder
 	ReplyMsg      *tg.UpdateShortSentMessage
@@ -87,7 +86,7 @@ func (e *DownloadQueueEntry) editReplyWithAutoDelete(ctx context.Context, qEntry
 		go func() {
 			time.Sleep(deleteAfter)
 			// Try to delete the message after the specified duration
-			e.editReply(ctx, "🗑️ Message deleted")
+			e.editReply(ctx, T("message_deleted", nil))
 			time.Sleep(1 * time.Second)
 			_, err := telegramSender.Self().Revoke().Messages(ctx, qEntry.ProgressMsgID)
 			if err != nil {
@@ -113,7 +112,9 @@ func (e *DownloadQueueEntry) deleteProgressMessage(ctx context.Context) {
 	}
 
 	var err error
-	if e.FromGroup != nil {
+	if e.ChatPeer != nil {
+		_, err = telegramSender.To(e.ChatPeer).Revoke().Messages(ctx, e.ProgressMsgID)
+	} else if e.FromGroup != nil {
 		peer := &tg.InputPeerChat{ChatID: e.FromGroup.ChatID}
 		_, err = telegramSender.To(peer).Revoke().Messages(ctx, e.ProgressMsgID)
 	} else {
@@ -150,7 +151,7 @@ type DownloadQueue struct {
 }
 
 func (e *DownloadQueue) getQueuePositionString(pos int) string {
-	return "👨‍👦‍👦 Request queued at position #" + fmt.Sprint(pos)
+	return T("queued", map[string]any{"Position": pos})
 }
 
 func (q *DownloadQueue) Add(ctx context.Context, entities tg.Entities, u *tg.UpdateNewMessage, url, format string) {
@@ -158,7 +159,7 @@ func (q *DownloadQueue) Add(ctx context.Context, entities tg.Entities, u *tg.Upd
 
 	var replyStr string
 	if len(q.entries) == 0 {
-		replyStr = processStartStr
+		replyStr = T("getting_info", nil)
 	} else {
 		fmt.Println("  queueing request at position #", len(q.entries))
 		replyStr = q.getQueuePositionString(len(q.entries))
@@ -195,7 +196,7 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 
 	var replyStr string
 	if len(q.entries) == 0 {
-		replyStr = processStartStr
+		replyStr = T("getting_info", nil)
 	} else {
 		fmt.Println("  queueing request at position #", len(q.entries))
 		replyStr = q.getQueuePositionString(len(q.entries))
@@ -221,6 +222,10 @@ func (q *DownloadQueue) AddFromContext(ctx context.Context, msgCtx *MessageConte
 	if msgCtx.FromGroupID != nil {
 		newEntry.FromGroup = &tg.PeerChat{ChatID: -*msgCtx.FromGroupID}
 	}
+	if peer, ok := msgCtx.chatInputPeer(); ok {
+		newEntry.ChatPeer = peer
+	}
+	newEntry.FromUserName = displayUserName(msgCtx.Entities, msgCtx.FromUserID)
 
 	// In groups/supergroups, show progress only to the requester using an
 	// ephemeral message so the chat stays clean for everyone else.
@@ -300,7 +305,7 @@ func (q *DownloadQueue) CancelCurrentEntry(ctx context.Context, entities tg.Enti
 		q.entries[0].CtxCancel()
 	} else {
 		fmt.Println("  no active request to cancel")
-		_, _ = telegramSender.Reply(entities, u).Text(ctx, errorStr+": no active request to cancel")
+		_, _ = telegramSender.Reply(entities, u).Text(ctx, T("no_active_request", nil))
 	}
 	q.mutex.Unlock()
 }
@@ -312,22 +317,26 @@ func (q *DownloadQueue) CancelCurrentEntryFromContext(ctx context.Context, msgCt
 		q.entries[0].CtxCancel()
 	} else {
 		fmt.Println("  no active request to cancel")
-		replyEphemeralOrPublic(ctx, msgCtx, errorStr+": no active request to cancel")
+		replyEphemeralOrPublic(ctx, msgCtx, T("no_active_request", nil))
 	}
 	q.mutex.Unlock()
 }
 
 func (q *DownloadQueue) updateProgress(ctx context.Context, qEntry *DownloadQueueEntry, progressStr string, progressPercent int) {
 	if progressPercent < 0 {
-		qEntry.editReply(ctx, progressStr+"... (no progress available)\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
+		qEntry.editReply(ctx, T("progress_unknown", map[string]any{"Label": progressStr})+"\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
 		return
 	}
 	if progressPercent == 0 {
-		qEntry.editReply(ctx, progressStr+"..."+q.currentlyDownloadedEntry.progressInfo+"\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
+		qEntry.editReply(ctx, T("progress_starting", map[string]any{"Label": progressStr, "Info": q.currentlyDownloadedEntry.progressInfo})+"\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
 		return
 	}
 	fmt.Print("  progress: ", progressPercent, "%\n")
-	qEntry.editReply(ctx, progressStr+": "+getProgressbar(progressPercent, progressBarLength)+q.currentlyDownloadedEntry.progressInfo+"\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
+	qEntry.editReply(ctx, T("progress_bar", map[string]any{
+		"Label": progressStr,
+		"Bar":   getProgressbar(progressPercent, progressBarLength),
+		"Info":  q.currentlyDownloadedEntry.progressInfo,
+	})+"\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
 	q.currentlyDownloadedEntry.lastDisplayedProgressPercent = progressPercent
 }
 
@@ -404,25 +413,16 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	}
 	fmt.Println(":", qEntry.URL)
 
-	qEntry.editReply(ctx, processStartStr)
+	qEntry.editReply(ctx, T("getting_info", nil))
 
 	downloader := Downloader{
 		ConvertStartFunc: func(ctx context.Context, videoCodecs, audioCodecs, convertActionsNeeded string) {
-			q.currentlyDownloadedEntry.sourceCodecInfo = "🎬 Source: " + videoCodecs
-			if audioCodecs == "" {
-				q.currentlyDownloadedEntry.sourceCodecInfo += ", no audio"
-			} else {
-				if videoCodecs != "" {
-					q.currentlyDownloadedEntry.sourceCodecInfo += " / "
-				}
-				q.currentlyDownloadedEntry.sourceCodecInfo += audioCodecs
-			}
-			if convertActionsNeeded == "" {
-				q.currentlyDownloadedEntry.sourceCodecInfo += " (no conversion needed)"
-			} else {
-				q.currentlyDownloadedEntry.sourceCodecInfo += " (converting: " + convertActionsNeeded + ")"
-			}
-			qEntry.editReply(ctx, "🎬 Preparing download...\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
+			q.currentlyDownloadedEntry.sourceCodecInfo = T("source_codecs", map[string]any{
+				"Video":   videoCodecs,
+				"Audio":   audioCodecs,
+				"Convert": convertActionsNeeded,
+			})
+			qEntry.editReply(ctx, T("preparing_download", nil)+"\n"+q.currentlyDownloadedEntry.sourceCodecInfo)
 		},
 		UpdateProgressPercentFunc: q.HandleProgressPercentUpdate,
 	}
@@ -434,14 +434,14 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		q.currentlyDownloadedEntry.disableProgressPercentUpdate = true
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 		// Show error and auto-delete after 10 seconds
-		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(errorStr+": ", err), 10*time.Second)
+		qEntry.editReplyWithAutoDelete(ctx, qEntry, T("error", map[string]any{"Err": err}), 10*time.Second)
 		return
 	}
 
 	// Feeding the returned io.ReadCloser to the uploader.
 	fmt.Println("  processing...")
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
-	q.updateProgress(ctx, qEntry, processStr, q.currentlyDownloadedEntry.lastProgressPercent)
+	q.updateProgress(ctx, qEntry, T("processing", nil), q.currentlyDownloadedEntry.lastProgressPercent)
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 
 	err = dlUploader.UploadFileFromEntry(qEntry.Ctx, qEntry, r, outputFormat, title, videoMetadata)
@@ -452,7 +452,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Unlock()
 		r.Close()
 		// Show error and auto-delete after 10 seconds
-		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(errorStr+": ", err), 10*time.Second)
+		qEntry.editReplyWithAutoDelete(ctx, qEntry, T("error", map[string]any{"Err": err}), 10*time.Second)
 		return
 	}
 	q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
@@ -464,7 +464,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 	if qEntry.Canceled {
 		fmt.Print("  canceled\n")
 		// Show canceled message and auto-delete after 5 seconds
-		qEntry.editReplyWithAutoDelete(ctx, qEntry, fmt.Sprint(canceledStr, " by user"), 5*time.Second)
+		qEntry.editReplyWithAutoDelete(ctx, qEntry, T("canceled", nil), 5*time.Second)
 	} else {
 		fmt.Print("  success!\n")
 	}
