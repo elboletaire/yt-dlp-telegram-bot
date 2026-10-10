@@ -49,10 +49,11 @@ func TestVideoFromUpload(t *testing.T) {
 	doc := &tg.Document{ID: 1, AccessHash: 2, FileReference: []byte{3}}
 	msg := &tg.Message{ID: 77, Date: 1760000000, Media: &tg.MessageMediaDocument{Document: doc}}
 	entry := &DownloadQueueEntry{
-		URL:          "https://example.com/v",
-		FromUser:     &tg.PeerUser{UserID: 10},
-		FromUserName: "@poster",
-		ChatPeer:     &tg.InputPeerChannel{ChannelID: 500, AccessHash: 600},
+		URL:                  "https://example.com/v",
+		FromUser:             &tg.PeerUser{UserID: 10},
+		FromUserName:         "@poster",
+		OrigChannelMsgUpdate: &tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 70}},
+		ChatPeer:             &tg.InputPeerChannel{ChannelID: 500, AccessHash: 600},
 	}
 	v, ok := videoFromUpload(entry, msg, "mp4", "Title")
 	if !ok {
@@ -62,6 +63,9 @@ func TestVideoFromUpload(t *testing.T) {
 		ChatID: 500, ChatType: ChatTypeChannel, ChatHash: 600, MsgID: 77, UserID: 10, UserName: "@poster",
 		Title: "Title", URL: "https://example.com/v", IsAudio: false, DocID: 1, DocHash: 2, FileRef: []byte{3},
 		PostedAt: time.Unix(1760000000, 0),
+	}
+	if v.OrigMsgID != 70 {
+		t.Fatalf("orig msg id = %d", v.OrigMsgID)
 	}
 	if v.ChatID != want.ChatID || v.ChatType != want.ChatType || v.ChatHash != want.ChatHash || v.MsgID != want.MsgID ||
 		v.UserID != want.UserID || v.UserName != want.UserName || v.Title != want.Title || v.URL != want.URL ||
@@ -115,5 +119,17 @@ func TestLikeLock(t *testing.T) {
 	}
 	if likeLock(100, 5) == likeLock(100, 6) {
 		t.Fatal("neighbouring messages should not share a lock")
+	}
+}
+
+func TestOrigMsgID(t *testing.T) {
+	if got := origMsgID(&DownloadQueueEntry{OrigMsgUpdate: &tg.UpdateNewMessage{Message: &tg.Message{ID: 5}}}); got != 5 {
+		t.Fatalf("got %d", got)
+	}
+	if got := origMsgID(&DownloadQueueEntry{OrigChannelMsgUpdate: &tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 6}}}); got != 6 {
+		t.Fatalf("got %d", got)
+	}
+	if got := origMsgID(&DownloadQueueEntry{}); got != 0 {
+		t.Fatalf("got %d", got)
 	}
 }

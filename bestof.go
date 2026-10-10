@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/gotd/td/tg"
@@ -21,23 +22,51 @@ func bestOfCaption(interval Interval, rank int, v RankedVideo) string {
 		link = fmt.Sprintf("https://t.me/c/%d/%d", v.ChatID, v.MsgID)
 	}
 	return T("best_of_caption", map[string]any{
-		"Interval": T("interval_"+string(interval), nil),
-		"Rank":     rank,
-		"Likes":    v.Likes,
-		"User":     v.UserName,
-		"Title":    v.Title,
-		"Link":     link,
+		"Interval":  T("interval_"+string(interval), nil),
+		"Rank":      rank,
+		"Likes":     v.Likes,
+		"Reactions": v.Reactions,
+		"Score":     v.Score(),
+		"User":      v.UserName,
+		"Title":     v.Title,
+		"Link":      link,
 	})
 }
 
-// postDigest reposts the top videos of [sched.Prev(occ), occ) in chat. The
-// digest is recorded as done even when sending fails, so a broken chat
-// (e.g. bot removed) doesn't retry forever.
-func postDigest(ctx context.Context, store *Store, sched Schedule, count int, chat Chat, occ time.Time, send bestOfSendFunc) error {
-	top, err := store.TopVideos(chat.ID, sched.Prev(occ), occ, count)
-	if err != nil {
-		return fmt.Errorf("loading top videos: %w", err)
+// rankVideos orders videos by score, then by post time, leaving out the ones
+// nobody liked or reacted to, and keeps the first limit.
+func rankVideos(videos []RankedVideo, limit int) []RankedVideo {
+	var res []RankedVideo
+	for _, v := range videos {
+		if v.Score() > 0 {
+			res = append(res, v)
+		}
 	}
+	sort.SliceStable(res, func(i, j int) bool {
+		if res[i].Score() != res[j].Score() {
+			return res[i].Score() > res[j].Score()
+		}
+		if !res[i].PostedAt.Equal(res[j].PostedAt) {
+			return res[i].PostedAt.Before(res[j].PostedAt)
+		}
+		return res[i].MsgID < res[j].MsgID
+	})
+	if len(res) > limit {
+		res = res[:limit]
+	}
+	return res
+}
+
+// postDigest reposts the highest scored videos of [sched.Prev(occ), occ) in
+// chat. The digest is recorded as done even when sending fails, so a broken
+// chat (e.g. bot removed) doesn't retry forever.
+func postDigest(ctx context.Context, store *Store, sched Schedule, count int, chat Chat, occ time.Time, fetch reactionsFetchFunc, send bestOfSendFunc) error {
+	videos, err := store.VideosInWindow(chat.ID, sched.Prev(occ), occ)
+	if err != nil {
+		return fmt.Errorf("loading videos: %w", err)
+	}
+	addReactions(ctx, chat, videos, fetch)
+	top := rankVideos(videos, count)
 
 	var sendErr error
 	rank := 0
@@ -98,7 +127,7 @@ func initDigests(store *Store, sched Schedule, now time.Time) {
 
 // runDueDigests posts, for every chat, the digests that became due since its
 // last one, oldest first.
-func runDueDigests(ctx context.Context, store *Store, sched Schedule, count int, now time.Time, send bestOfSendFunc) {
+func runDueDigests(ctx context.Context, store *Store, sched Schedule, count int, now time.Time, fetch reactionsFetchFunc, send bestOfSendFunc) {
 	chats, err := store.Chats()
 	if err != nil {
 		fmt.Println("best-of: error listing chats:", err)
@@ -117,7 +146,7 @@ func runDueDigests(ctx context.Context, store *Store, sched Schedule, count int,
 		}
 		for _, occ := range dueOccurrences(sched, last, now, maxCatchUpDigests) {
 			fmt.Println("best-of: posting digest of", occ, "for chat", chat.ID)
-			if err := postDigest(ctx, store, sched, count, chat, occ, send); err != nil {
+			if err := postDigest(ctx, store, sched, count, chat, occ, fetch, send); err != nil {
 				fmt.Println("  best-of error:", err)
 				sendTextToAdmins(ctx, T("best_of_failed", map[string]any{
 					"Interval": T("interval_"+string(sched.Interval), nil),
@@ -136,7 +165,7 @@ func runBestOf(ctx context.Context, store *Store, sched Schedule, count int) {
 		// The next wake-up is based on when this run started, so an occurrence
 		// passing while digests are being sent is picked up right away.
 		now := time.Now()
-		runDueDigests(ctx, store, sched, count, now, sendBestOfVideo)
+		runDueDigests(ctx, store, sched, count, now, fetchReactions, sendBestOfVideo)
 		next := sched.Next(now)
 		fmt.Println("best-of: next digest at", next)
 		timer := time.NewTimer(time.Until(next))
@@ -187,29 +216,9 @@ func sendBestOfVideo(ctx context.Context, chat Chat, v RankedVideo, caption stri
 // refreshFileRef fetches the original message again to get a fresh file
 // reference and stores it.
 func refreshFileRef(ctx context.Context, chat Chat, v Video) ([]byte, error) {
-	ids := []tg.InputMessageClass{&tg.InputMessageID{ID: v.MsgID}}
-	var res tg.MessagesMessagesClass
-	var err error
-	if chat.Type == ChatTypeChannel {
-		res, err = telegramAPI.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
-			Channel: &tg.InputChannel{ChannelID: chat.ID, AccessHash: chat.Hash},
-			ID:      ids,
-		})
-	} else {
-		res, err = telegramAPI.MessagesGetMessages(ctx, ids)
-	}
+	msgs, err := getChatMessages(ctx, chat, []int{v.MsgID})
 	if err != nil {
 		return nil, fmt.Errorf("refetching message: %w", err)
-	}
-
-	var msgs []tg.MessageClass
-	switch m := res.(type) {
-	case *tg.MessagesMessages:
-		msgs = m.Messages
-	case *tg.MessagesMessagesSlice:
-		msgs = m.Messages
-	case *tg.MessagesChannelMessages:
-		msgs = m.Messages
 	}
 	for _, mc := range msgs {
 		msg, ok := mc.(*tg.Message)

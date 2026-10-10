@@ -99,8 +99,9 @@ Set `-likes` (or `LIKES_ENABLED=true`) to add a ❤️ button under every video
 the bot uploads in a group. Members can tap it to like or unlike a video; the
 person who requested the video can't like their own.
 
-Periodically, the bot reposts the most liked videos of each group with a
-"🏆 Best of the week" caption. Configure it with:
+Periodically, the bot reposts the best videos of each group, ranked by ❤️
+button likes plus the reactions on the original message with the link and on
+the bot's video, with a "🏆 Best of the week" caption. Configure it with:
 
 - `BEST_OF_INTERVAL`: `day`, `week` (default), `month` or `off`
 - `BEST_OF_AT`: when to post, in the container's `TZ`: `20:00` for daily,

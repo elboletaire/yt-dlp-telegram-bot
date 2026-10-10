@@ -48,7 +48,7 @@ func TestPostDigest(t *testing.T) {
 	}
 
 	f := &fakeSender{failFor: map[int]error{1: errVideoGone}}
-	err := postDigest(context.Background(), s, sched, 2, Chat{ID: 100, Type: ChatTypeChannel}, occ, f.send)
+	err := postDigest(context.Background(), s, sched, 2, Chat{ID: 100, Type: ChatTypeChannel}, occ, noReactions, f.send)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestPostDigestErrorStillRecords(t *testing.T) {
 	s.ToggleLike(100, 1, 2)
 
 	f := &fakeSender{failFor: map[int]error{1: errors.New("CHAT_WRITE_FORBIDDEN")}}
-	err := postDigest(context.Background(), s, sched, 3, Chat{ID: 100, Type: ChatTypeChannel}, occ, f.send)
+	err := postDigest(context.Background(), s, sched, 3, Chat{ID: 100, Type: ChatTypeChannel}, occ, noReactions, f.send)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -85,7 +85,7 @@ func TestPostDigestNothingLiked(t *testing.T) {
 	occ := time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC)
 	addVideo(t, s, 100, 1, 1, occ.Add(-time.Hour))
 	f := &fakeSender{}
-	if err := postDigest(context.Background(), s, sched, 3, Chat{ID: 100}, occ, f.send); err != nil {
+	if err := postDigest(context.Background(), s, sched, 3, Chat{ID: 100}, occ, noReactions, f.send); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.sent) != 0 {
@@ -149,7 +149,7 @@ func TestRunDueDigests(t *testing.T) {
 	}
 
 	f := &fakeSender{}
-	runDueDigests(context.Background(), s, sched, 3, now, f.send)
+	runDueDigests(context.Background(), s, sched, 3, now, noReactions, f.send)
 
 	if len(f.sent) != 3 {
 		t.Fatalf("expected 2 catch-up digests for chat 100 and 1 for chat 300, sent = %q", f.sent)
@@ -158,5 +158,67 @@ func TestRunDueDigests(t *testing.T) {
 		if at, ok, _ := s.LastDigest(chat); !ok || !at.Equal(day(11)) {
 			t.Fatalf("chat %d last digest = %v %v, want %v", chat, at, ok, day(11))
 		}
+	}
+}
+
+func noReactions(ctx context.Context, chat Chat, ids []int) (map[int]int, error) {
+	return nil, nil
+}
+
+func TestRankVideos(t *testing.T) {
+	at := func(h int) time.Time { return base.Add(time.Duration(h) * time.Hour) }
+	videos := []RankedVideo{
+		{Video: Video{MsgID: 1, PostedAt: at(0)}, Likes: 1},               // 1
+		{Video: Video{MsgID: 2, PostedAt: at(1)}, Likes: 0, Reactions: 4}, // 4
+		{Video: Video{MsgID: 3, PostedAt: at(2)}},                         // 0 → left out
+		{Video: Video{MsgID: 4, PostedAt: at(3)}, Likes: 2, Reactions: 2}, // 4, later than #2
+		{Video: Video{MsgID: 5, PostedAt: at(4)}, Reactions: 1},           // 1, later than #1
+	}
+	got := rankVideos(videos, 10)
+	var ids []int
+	for _, v := range got {
+		ids = append(ids, v.MsgID)
+	}
+	want := []int{2, 4, 1, 5}
+	if len(ids) != len(want) {
+		t.Fatalf("order = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("order = %v, want %v", ids, want)
+		}
+	}
+	if got := rankVideos(videos, 2); len(got) != 2 || got[1].MsgID != 4 {
+		t.Fatalf("limit: %+v", got)
+	}
+}
+
+func TestBestOfCaptionWithReactions(t *testing.T) {
+	v := RankedVideo{Video: Video{ChatType: ChatTypeChat, UserName: "@poster"}, Likes: 4, Reactions: 7}
+	if got, want := bestOfCaption(IntervalWeek, 1, v), "🏆 Best of the week #1 · 4 ❤️ · 7 reactions · @poster"; got != want {
+		t.Fatalf("caption = %q, want %q", got, want)
+	}
+	v.Likes, v.Reactions = 0, 1
+	if got, want := bestOfCaption(IntervalWeek, 1, v), "🏆 Best of the week #1 · 1 reaction · @poster"; got != want {
+		t.Fatalf("caption = %q, want %q", got, want)
+	}
+}
+
+func TestPostDigestUsesReactions(t *testing.T) {
+	s := newTestStore(t)
+	sched := mustSchedule(t, "day", "20:00")
+	occ := time.Date(2026, 10, 11, 20, 0, 0, 0, time.UTC)
+	addVideo(t, s, 100, 1, 1, occ.Add(-2*time.Hour)) // 1 like
+	addVideo(t, s, 100, 2, 1, occ.Add(-time.Hour))   // no likes, 3 reactions on the original post
+	s.ToggleLike(100, 1, 2)
+	fetch := func(ctx context.Context, chat Chat, ids []int) (map[int]int, error) {
+		return map[int]int{1002: 3}, nil // addVideo sets OrigMsgID = msgID + 1000
+	}
+	f := &fakeSender{}
+	if err := postDigest(context.Background(), s, sched, 3, Chat{ID: 100}, occ, fetch, f.send); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.sent) != 2 || !strings.Contains(f.sent[0], "#1 · 3 reactions") || !strings.Contains(f.sent[1], "#2 · 1 ❤️") {
+		t.Fatalf("sent = %q", f.sent)
 	}
 }

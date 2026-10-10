@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func addVideo(t *testing.T, s *Store, chatID int64, msgID int, userID int64, pos
 	err := s.AddVideo(Video{
 		ChatID: chatID, ChatType: ChatTypeChannel, ChatHash: 42, MsgID: msgID,
 		UserID: userID, UserName: "@poster", Title: "t", URL: "https://x",
-		DocID: int64(msgID) * 10, DocHash: 7, FileRef: []byte{1, 2}, PostedAt: posted,
+		DocID: int64(msgID) * 10, DocHash: 7, FileRef: []byte{1, 2}, PostedAt: posted, OrigMsgID: msgID + 1000,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestAddAndGetVideo(t *testing.T) {
 	if err != nil || v == nil {
 		t.Fatalf("GetVideo: %v %v", v, err)
 	}
-	if v.UserID != 1 || v.DocID != 50 || string(v.FileRef) != "\x01\x02" || !v.PostedAt.Equal(base) || v.ChatType != ChatTypeChannel {
+	if v.OrigMsgID != 1005 || v.UserID != 1 || v.DocID != 50 || string(v.FileRef) != "\x01\x02" || !v.PostedAt.Equal(base) || v.ChatType != ChatTypeChannel {
 		t.Fatalf("unexpected video: %+v", v)
 	}
 	missing, err := s.GetVideo(100, 6)
@@ -65,52 +66,75 @@ func TestToggleLike(t *testing.T) {
 	}
 }
 
-func TestTopVideos(t *testing.T) {
+func TestVideosInWindow(t *testing.T) {
 	s := newTestStore(t)
 	addVideo(t, s, 100, 1, 1, base)                  // 1 like
 	addVideo(t, s, 100, 2, 1, base.Add(time.Hour))   // 2 likes
-	addVideo(t, s, 100, 3, 1, base.Add(2*time.Hour)) // 1 like, later than #1
-	addVideo(t, s, 100, 4, 1, base.Add(3*time.Hour)) // 0 likes → excluded
-	addVideo(t, s, 100, 5, 1, base.Add(-time.Hour))  // before window
-	addVideo(t, s, 200, 6, 1, base)                  // other chat
-	for _, l := range []struct {
-		msg  int
-		user int64
-	}{{1, 2}, {2, 2}, {2, 3}, {3, 2}, {5, 2}, {5, 3}, {5, 4}, {6, 2}} {
-		chat := int64(100)
-		if l.msg == 6 {
-			chat = 200
-		}
-		if _, _, err := s.ToggleLike(chat, l.msg, l.user); err != nil {
+	addVideo(t, s, 100, 3, 1, base.Add(-time.Hour))  // before window
+	addVideo(t, s, 100, 4, 1, base.Add(2*time.Hour)) // 0 likes, still returned
+	addVideo(t, s, 200, 5, 1, base)                  // other chat
+	for _, l := range [][2]int64{{1, 2}, {2, 2}, {2, 3}, {3, 2}} {
+		if _, _, err := s.ToggleLike(100, int(l[0]), l[1]); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	top, err := s.TopVideos(100, base, base.Add(24*time.Hour), 10)
+	videos, err := s.VideosInWindow(100, base, base.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []int
-	for _, v := range top {
-		ids = append(ids, v.MsgID)
+	// Upper bound is exclusive, so msg 4 (posted exactly at the bound) is left out.
+	if len(videos) != 2 || videos[0].MsgID != 1 || videos[1].MsgID != 2 {
+		t.Fatalf("videos = %+v", videos)
 	}
-	want := []int{2, 1, 3}
-	if len(ids) != len(want) || ids[0] != 2 || ids[1] != 1 || ids[2] != 3 {
-		t.Fatalf("order = %v, want %v", ids, want)
-	}
-	if top[0].Likes != 2 || top[1].Likes != 1 {
-		t.Fatalf("likes = %d, %d", top[0].Likes, top[1].Likes)
+	if videos[0].Likes != 1 || videos[1].Likes != 2 || videos[0].OrigMsgID != 1001 {
+		t.Fatalf("likes/orig = %+v", videos)
 	}
 
-	limited, _ := s.TopVideos(100, base, base.Add(24*time.Hour), 1)
-	if len(limited) != 1 || limited[0].MsgID != 2 {
-		t.Fatalf("limit: %+v", limited)
+	all, _ := s.VideosInWindow(100, base, base.Add(24*time.Hour))
+	if len(all) != 3 || all[2].MsgID != 4 || all[2].Likes != 0 {
+		t.Fatalf("videos without likes must be included: %+v", all)
 	}
+}
 
-	// Upper bound is exclusive.
-	exclusive, _ := s.TopVideos(100, base, base.Add(time.Hour), 10)
-	if len(exclusive) != 1 || exclusive[0].MsgID != 1 {
-		t.Fatalf("exclusive upper bound: %+v", exclusive)
+func TestRankedVideoScore(t *testing.T) {
+	if got := (RankedVideo{Likes: 2, Reactions: 5}).Score(); got != 7 {
+		t.Fatalf("score = %d", got)
+	}
+}
+
+func TestStoreMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bot.db")
+
+	// A database created before the migration existed.
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(storeSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO videos (chat_id, chat_type, chat_hash, msg_id, user_id, user_name, title, url, is_audio, doc_id, doc_hash, doc_file_ref, posted_at)
+		VALUES (100, 'channel', 1, 5, 1, '@x', 't', 'u', 0, 1, 1, x'01', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	for i := 0; i < 2; i++ { // reopening must be idempotent
+		s, err := OpenStore(path)
+		if err != nil {
+			t.Fatalf("open #%d: %v", i, err)
+		}
+		v, err := s.GetVideo(100, 5)
+		if err != nil || v == nil || v.OrigMsgID != 0 {
+			t.Fatalf("old row after migration: %+v %v", v, err)
+		}
+		var version int
+		s.db.QueryRow("PRAGMA user_version").Scan(&version)
+		if version != len(storeMigrations) {
+			t.Fatalf("user_version = %d", version)
+		}
+		s.Close()
 	}
 }
 

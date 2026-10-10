@@ -40,7 +40,8 @@ like_self: "You can't like your own video 😅"
 interval_day: "day"
 interval_week: "week"
 interval_month: "month"
-# Fields: .Interval, .Rank, .Likes, .User, .Title, .Link (.Link may be empty)
-best_of_caption: "🏆 Best of the {{.Interval}} #{{.Rank}} · {{.Likes}} ❤️ · {{.User}}{{if .Link}}\n{{.Link}}{{end}}"
+# Fields: .Interval, .Rank, .Likes (❤️ button), .Reactions (on the original post and the video),
+# .Score (.Likes + .Reactions), .User, .Title, .Link (.Link may be empty)
+best_of_caption: "🏆 Best of the {{.Interval}} #{{.Rank}} · {{if .Likes}}{{.Likes}} ❤️ · {{end}}{{if .Reactions}}{{.Reactions}} {{if eq .Reactions 1}}reaction{{else}}reactions{{end}} · {{end}}{{.User}}{{if .Link}}\n{{.Link}}{{end}}"
 # Fields: .Interval, .Chat, .Err
 best_of_failed: "❌ Best of the {{.Interval}} failed for chat {{.Chat}}: {{.Err}}"

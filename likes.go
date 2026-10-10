@@ -70,6 +70,22 @@ func extractSentMessage(u tg.UpdatesClass) *tg.Message {
 	return nil
 }
 
+// origMsgID returns the ID of the user's message with the link. qEntry.OrigMsg
+// can't be used: for context-based requests it's a stand-in without an ID.
+func origMsgID(qEntry *DownloadQueueEntry) int {
+	var msg tg.MessageClass
+	switch {
+	case qEntry.OrigMsgUpdate != nil:
+		msg = qEntry.OrigMsgUpdate.Message
+	case qEntry.OrigChannelMsgUpdate != nil:
+		msg = qEntry.OrigChannelMsgUpdate.Message
+	}
+	if m, ok := msg.(*tg.Message); ok {
+		return m.ID
+	}
+	return 0
+}
+
 func extractDocument(msg *tg.Message) *tg.Document {
 	media, ok := msg.Media.(*tg.MessageMediaDocument)
 	if !ok {
@@ -90,16 +106,17 @@ func videoFromUpload(qEntry *DownloadQueueEntry, msg *tg.Message, format, title 
 		return Video{}, false
 	}
 	v := Video{
-		MsgID:    msg.ID,
-		UserID:   qEntry.FromUser.UserID,
-		UserName: qEntry.FromUserName,
-		Title:    title,
-		URL:      qEntry.URL,
-		IsAudio:  format == "mp3",
-		DocID:    doc.ID,
-		DocHash:  doc.AccessHash,
-		FileRef:  doc.FileReference,
-		PostedAt: time.Unix(int64(msg.Date), 0),
+		MsgID:     msg.ID,
+		OrigMsgID: origMsgID(qEntry),
+		UserID:    qEntry.FromUser.UserID,
+		UserName:  qEntry.FromUserName,
+		Title:     title,
+		URL:       qEntry.URL,
+		IsAudio:   format == "mp3",
+		DocID:     doc.ID,
+		DocHash:   doc.AccessHash,
+		FileRef:   doc.FileReference,
+		PostedAt:  time.Unix(int64(msg.Date), 0),
 	}
 	switch p := qEntry.ChatPeer.(type) {
 	case *tg.InputPeerChat:
