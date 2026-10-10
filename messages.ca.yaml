@@ -1,0 +1,50 @@
+# Missatges en català. Fes-lo servir amb MESSAGES_FILE=/ruta/messages.ca.yaml.
+# Els valors són plantilles de Go text/template; els camps disponibles
+# s'indiquen a cada clau.
+
+getting_info: "🔍 Obtenint informació..."
+processing: "🔨 Processant"
+uploading: "☁️ Pujant"
+# Camps: .Position
+queued: "👨‍👦‍👦 Petició a la cua, posició #{{.Position}}"
+preparing_download: "🎬 Preparant la descàrrega..."
+# Camps: .Video, .Audio, .Convert (tots poden ser buits)
+source_codecs: "🎬 Origen: {{.Video}}{{if .Audio}}{{if .Video}} / {{end}}{{.Audio}}{{else}}, sense àudio{{end}}{{if .Convert}} (convertint: {{.Convert}}){{else}} (no cal convertir){{end}}"
+# Camps: .Label
+progress_unknown: "{{.Label}}... (progrés no disponible)"
+# Camps: .Label, .Info
+progress_starting: "{{.Label}}...{{.Info}}"
+# Camps: .Label, .Bar, .Info
+progress_bar: "{{.Label}}: {{.Bar}}{{.Info}}"
+message_deleted: "🗑️ Missatge esborrat"
+# Camps: .Err
+error: "❌ Error: {{.Err}}"
+canceled: "❌ Cancel·lat per l'usuari"
+no_active_request: "❌ Error: no hi ha cap petició activa per cancel·lar"
+invalid_command: "❌ Error: ordre no vàlida"
+welcome: "🤖 Benvingut/da! Aquest bot descarrega vídeos de diverses fonts compatibles i els torna a pujar a Telegram, perquè es puguin veure amb el reproductor de vídeo integrat de Telegram.\n\nMés informació: https://github.com/nonoo/yt-dlp-telegram-bot"
+# Camps: .Version
+bot_started: "🤖 Bot iniciat, {{.Version}}"
+# Camps: .Version
+bot_updated: "🤖 Bot actualitzat, {{.Version}}"
+# Camps: .Current
+ytdlp_up_to_date: "Versió de yt-dlp: {{.Current}} (actualitzada)"
+# Camps: .Current, .Latest
+ytdlp_update_needed: "📢 Versió de yt-dlp: {{.Current}} 📢 Cal actualitzar! La darrera versió és la {{.Latest}} 📢"
+
+# M'agrada i «El millor de...» (només amb LIKES_ENABLED=true)
+# Camps: .Count
+like_button: "❤️ {{.Count}}"
+liked: "❤️ T'agrada!"
+unliked: "💔 Ja no t'agrada"
+like_self: "No pots fer m'agrada al teu propi vídeo 😅"
+# L'interval inclou la preposició perquè la frase quadri: «El millor del dia»,
+# «El millor de la setmana», «El millor del mes».
+interval_day: "del dia"
+interval_week: "de la setmana"
+interval_month: "del mes"
+# Camps: .Interval, .Rank, .Likes (botó ❤️), .Reactions (a la publicació original i al vídeo),
+# .Score (.Likes + .Reactions), .User, .Title, .Link (.Link pot ser buit)
+best_of_caption: "🏆 El millor {{.Interval}} #{{.Rank}} · {{if .Likes}}{{.Likes}} ❤️ · {{end}}{{if .Reactions}}{{.Reactions}} {{if eq .Reactions 1}}reacció{{else}}reaccions{{end}} · {{end}}{{.User}}{{if .Link}}\n{{.Link}}{{end}}"
+# Camps: .Interval, .Chat, .Err
+best_of_failed: "❌ Ha fallat «El millor {{.Interval}}» al xat {{.Chat}}: {{.Err}}"
