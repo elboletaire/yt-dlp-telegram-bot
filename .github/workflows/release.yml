@@ -1,0 +1,48 @@
+name: Build and release binary
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: nonoo/yt-dlp-telegram-bot:latest
+      BINARY: yt-dlp-telegram-bot-linux-amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: ./docker-build.sh
+
+      - name: Extract binary from image
+        run: |
+          id=$(docker create "$IMAGE")
+          docker cp "$id:/app/yt-dlp-telegram-bot" "$BINARY"
+          docker rm "$id"
+          chmod +x "$BINARY"
+          sha256sum "$BINARY" > "$BINARY.sha256"
+          file "$BINARY"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY }}
+          path: |
+            ${{ env.BINARY }}
+            ${{ env.BINARY }}.sha256
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.BINARY }}
+            ${{ env.BINARY }}.sha256
+          generate_release_notes: true
