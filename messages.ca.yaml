@@ -23,6 +23,7 @@ canceled: "❌ Cancel·lat per l'usuari"
 no_active_request: "❌ Error: no hi ha cap petició activa per cancel·lar"
 invalid_command: "❌ Error: ordre no vàlida"
 welcome: "🤖 Benvingut/da! Aquest bot descarrega vídeos de diverses fonts compatibles i els torna a pujar a Telegram, perquè es puguin veure amb el reproductor de vídeo integrat de Telegram.\n\nMés informació: https://github.com/nonoo/yt-dlp-telegram-bot"
+help: "🤖 Ordres disponibles:\n\n/dlp <url> - Descarrega el vídeo de l'URL indicada\n/dlp mp3 <url> - Descarrega només l'àudio en MP3 de 320k\n/dlpcancel - Cancel·la la descàrrega en curs\n/help - Mostra aquesta ajuda\n\nTambé pots enviar directament una URL i es descarregarà."
 # Camps: .Version
 bot_started: "🤖 Bot iniciat, {{.Version}}"
 # Camps: .Version

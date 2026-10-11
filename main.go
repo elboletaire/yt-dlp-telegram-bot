@@ -153,6 +153,10 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 		case "dlpcancel":
 			handleCmdDLPCancel(ctx, msgCtx, messageText)
 			return nil
+		case "help":
+			fmt.Println("  (help cmd)")
+			_, _ = msgCtx.ReplyBuilder().Text(ctx, T("help", nil))
+			return nil
 		case "start":
 			fmt.Println("  (start cmd)")
 			if msgCtx.FromGroupID == nil {

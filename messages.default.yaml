@@ -22,6 +22,7 @@ canceled: "❌ Canceled by user"
 no_active_request: "❌ Error: no active request to cancel"
 invalid_command: "❌ Error: invalid command"
 welcome: "🤖 Welcome! This bot downloads videos from various supported sources and then re-uploads them to Telegram, so they can be viewed with Telegram's built-in video player.\n\nMore info: https://github.com/nonoo/yt-dlp-telegram-bot"
+help: "🤖 Available commands:\n\n/dlp <url> - Download the video at the given URL\n/dlp mp3 <url> - Download only the audio as a 320k MP3\n/dlpcancel - Cancel the ongoing download\n/help - Show this help\n\nYou can also just send a URL and it will be downloaded."
 # Fields: .Version
 bot_started: "🤖 Bot started, {{.Version}}"
 # Fields: .Version
