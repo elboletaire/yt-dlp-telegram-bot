@@ -114,6 +114,7 @@ func (d *Downloader) DownloadAndConvertURL(ctx context.Context, url, format stri
 	}
 
 	if err := conv.Probe(rr); err != nil {
+		_ = rr.Close()
 		return nil, "", "", nil, err
 	}
 
@@ -123,6 +124,7 @@ func (d *Downloader) DownloadAndConvertURL(ctx context.Context, url, format stri
 
 	r, outputFormat, err = conv.ConvertIfNeeded(ctx, rr)
 	if err != nil {
+		_ = rr.Close()
 		return nil, "", "", nil, err
 	}
 

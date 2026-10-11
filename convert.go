@@ -319,6 +319,8 @@ func (c *Converter) ConvertIfNeeded(ctx context.Context, rr *ReReadCloser) (read
 	// This goroutine handles copying from the input (either rr or cmd.Stdout) to writer.
 	go func() {
 		runErr := cmd.Run()
+		// ffmpeg has consumed the input, so release it (removes the temp file).
+		_ = rr.Close()
 		if progressSock != nil {
 			progressSock.Close()
 		}
