@@ -12,14 +12,17 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
     env:
       IMAGE: nonoo/yt-dlp-telegram-bot:latest
-      BINARY: yt-dlp-telegram-bot-linux-amd64
+      BINARY: yt-dlp-telegram-bot-linux-${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: ./docker-build.sh
+        run: ./docker-build.sh --target builder --build-arg GOARCH=${{ matrix.goarch }}
 
       - name: Extract binary from image
         run: |
@@ -38,11 +41,19 @@ jobs:
             ${{ env.BINARY }}
             ${{ env.BINARY }}.sha256
 
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ${{ env.BINARY }}
-            ${{ env.BINARY }}.sha256
+          files: dist/*
           generate_release_notes: true
