@@ -1,0 +1,28 @@
+[Unit]
+Description=yt-dlp Telegram bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ytbot
+Group=ytbot
+# The .env file and bot.db are read from the working directory.
+WorkingDirectory=/var/lib/yt-dlp-telegram-bot
+ExecStart=/usr/local/bin/yt-dlp-telegram-bot
+Environment=SESSION_DIR=/var/lib/yt-dlp-telegram-bot/session
+# yt-dlp, ffmpeg and ffprobe must be found in this PATH (or set YTDLP_PATH).
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Timezone used for BEST_OF_AT.
+#Environment=TZ=Europe/Madrid
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yt-dlp-telegram-bot
+
+[Install]
+WantedBy=multi-user.target

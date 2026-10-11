@@ -93,6 +93,35 @@ file `/tmp/ytdlp-cookies.txt`. This will be used by `yt-dlp` if it is running
 in a docker container, as the `yt-dlp.conf` file in the container points to this
 cookie file.
 
+## Running as a systemd service
+
+A sample unit file is provided in
+[yt-dlp-telegram-bot.service](yt-dlp-telegram-bot.service). It runs the bot as
+a dedicated `ytbot` user with `/var/lib/yt-dlp-telegram-bot` as the working
+directory, where the `.env` file, the `bot.db` database and the Telegram
+session are kept.
+
+```
+sudo install -m 755 yt-dlp-telegram-bot /usr/local/bin/
+sudo useradd --system --home-dir /var/lib/yt-dlp-telegram-bot --create-home \
+  --shell /usr/sbin/nologin ytbot
+sudo install -m 600 -o ytbot -g ytbot .env.example /var/lib/yt-dlp-telegram-bot/.env
+sudo nano /var/lib/yt-dlp-telegram-bot/.env
+sudo cp yt-dlp-telegram-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now yt-dlp-telegram-bot
+```
+
+Check the logs with `journalctl -u yt-dlp-telegram-bot -f`.
+
+`yt-dlp`, `ffmpeg` and `ffprobe` must be installed system-wide (e.g. in
+`/usr/local/bin`), as the service can't access home directories. Otherwise,
+set `YTDLP_PATH` in the `.env` file. Any other files the bot uses, like a
+messages YAML file, should be put in `/var/lib/yt-dlp-telegram-bot` too.
+
+To update the bot, install the new binary and run
+`sudo systemctl restart yt-dlp-telegram-bot`.
+
 ## Likes and "Best of"
 
 Set `-likes` (or `LIKES_ENABLED=true`) to add a ❤️ button under every video
