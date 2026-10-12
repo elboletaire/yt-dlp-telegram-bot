@@ -38,14 +38,7 @@ type MessageContext struct {
 	OrigChannelMsgUpdate *tg.UpdateNewChannelMessage // for channel messages
 }
 
-func handleCmdDLP(ctx context.Context, msgCtx *MessageContext, messageText string) {
-	format := "video"
-	s := strings.Split(messageText, " ")
-	if len(s) >= 2 && s[0] == "mp3" {
-		messageText = strings.Join(s[1:], " ")
-		format = "mp3"
-	}
-
+func handleCmdDLP(ctx context.Context, msgCtx *MessageContext, messageText, format string) {
 	// Check if message is an URL.
 	validURI := true
 	uri, err := url.ParseRequestURI(messageText)
@@ -148,7 +141,10 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 		cmd = cmd[1:] // Cutting the command character.
 		switch cmd {
 		case "dlp":
-			handleCmdDLP(ctx, msgCtx, messageText)
+			handleCmdDLP(ctx, msgCtx, messageText, "video")
+			return nil
+		case "mp3":
+			handleCmdDLP(ctx, msgCtx, messageText, "mp3")
 			return nil
 		case "dlpcancel":
 			handleCmdDLPCancel(ctx, msgCtx, messageText)
@@ -173,7 +169,7 @@ func handleMessageContext(ctx context.Context, msgCtx *MessageContext) error {
 	}
 
 	// Process URLs for both direct messages and authorized groups
-	handleCmdDLP(ctx, msgCtx, msgCtx.MessageText)
+	handleCmdDLP(ctx, msgCtx, msgCtx.MessageText, "video")
 	return nil
 }
 

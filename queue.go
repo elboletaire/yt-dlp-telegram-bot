@@ -427,7 +427,7 @@ func (q *DownloadQueue) processQueueEntry(ctx context.Context, qEntry *DownloadQ
 		UpdateProgressPercentFunc: q.HandleProgressPercentUpdate,
 	}
 
-	r, outputFormat, title, videoMetadata, err := downloader.DownloadAndConvertURL(qEntry.Ctx, qEntry.OrigMsg.Message, qEntry.Format)
+	r, outputFormat, title, videoMetadata, err := downloader.DownloadAndConvertURL(qEntry.Ctx, qEntry.URL, qEntry.Format)
 	if err != nil {
 		fmt.Println("  error downloading:", err)
 		q.currentlyDownloadedEntry.progressPercentUpdateMutex.Lock()
