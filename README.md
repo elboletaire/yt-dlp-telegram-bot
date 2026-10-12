@@ -153,8 +153,9 @@ fields are documented next to each key.
 
 ## Supported commands
 
-- `/dlp` - Download given URL. If the first attribute is "mp3" then only the
-  audio stream will be downloaded and converted (if needed) to 320k MP3
+- `/dlp` - Download given URL
+- `/mp3` - Download only the audio stream of the given URL and convert it (if
+  needed) to 320k MP3
 - `/dlpcancel` - Cancel ongoing download
 - `/help` - Show the available commands
 
